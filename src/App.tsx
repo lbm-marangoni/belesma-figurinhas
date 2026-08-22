@@ -4,6 +4,7 @@ import Login from './paginas/Login'
 import Colecao from './paginas/Colecao'
 import Abrir from './paginas/Abrir'
 import Admin from './paginas/Admin'
+import Perfil from './paginas/Perfil'
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ function Rotas() {
         <Route path="/" element={<Navigate to="/colecao" replace />} />
         <Route path="/colecao" element={<Colecao />} />
         <Route path="/abrir" element={<Abrir />} />
+        <Route path="/perfil" element={<Perfil />} />
         <Route path="/admin" element={<Admin />} />
         <Route path="*" element={<Navigate to="/colecao" replace />} />
       </Routes>
@@ -54,12 +56,13 @@ function Shell() {
       <NavLink to="/abrir" className={aba}>
         Abrir {pacotes > 0 && <span className="text-emerald-400">({pacotes})</span>}
       </NavLink>
+      <NavLink to="/perfil" className={aba}>Perfil</NavLink>
       {jogador.is_admin && <NavLink to="/admin" className={aba}>Admin</NavLink>}
 
       <div className="ml-auto flex items-center gap-3 text-sm">
         {/* Saldo sempre visível (spec §19.8). A moeda entra na Fase 6. */}
         <span className="text-neutral-400">{jogador.baba} baba</span>
-        <span className="text-neutral-300">{jogador.nickname}</span>
+        <Link to="/perfil" className="text-neutral-300">{jogador.nickname}</Link>
         <button onClick={sair} className="text-neutral-500 underline underline-offset-4">sair</button>
       </div>
     </header>
