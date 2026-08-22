@@ -1,7 +1,7 @@
 # BELESMA — figurinhas
 
 Implementação de `BELESMA-BUILD.md` (a spec mestre, na pasta acima).
-**Estado: Fases 1 e 2 concluídas.** Fase 3 em diante não começou.
+**Estado: Fases 1, 2 e 3 concluídas.** Fase 4 em diante não começou.
 
 Este projeto é novo e separado de `../belesma/`, que é a implementação da spec
 antiga (`BELESMA-SPEC.md`, modelo de cartas com `rarity`). Aquele projeto não
@@ -104,3 +104,22 @@ O `dist/404.html` é cópia do `index.html`: é o que faz link direto para
 O e-mail é sintético (`apelido@belesma.local`), então **a confirmação de
 e-mail precisa ficar desligada** (`mailer_autoconfirm: true`) e o mínimo de
 senha é 6. Já está assim no projeto.
+
+## Efeito 3D (Fase 3)
+
+Tudo em CSS `transform` + `perspective`, sem Three.js nem WebGL. O JS escreve
+só quatro variáveis no palco (`--rx`, `--ry`, `--px`, `--py`); as camadas de
+`src/styles/figurinha.css` fazem o resto.
+
+**A armadilha do §12, e por que este código não cai nela:** nunca leia
+`getBoundingClientRect()` do elemento que carrega o `transform`. Esse rect é a
+caixa *projetada* — e como o tilt sai dessa leitura, vira realimentação.
+Medido neste projeto, girando de -12° a +12°:
+
+| leitura | variação |
+|---|---|
+| rect do palco (o que `useTilt` usa) | **0 px** |
+| rect da carta transformada (proibido) | 7,3 px |
+
+`src/lib/tilt.ts` usa rect do palco + `offsetWidth`/`offsetHeight` da
+figurinha, derivando a escala de ancestrais por `rect.width / offsetWidth`.

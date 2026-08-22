@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useSessao } from '../lib/sessao'
 import { Figurinha } from '../componentes/Figurinha'
+import { CartaAberta } from '../componentes/CartaAberta'
 import type { ResultadoPacote, TipoPacote } from '../lib/tipos'
 
 /**
@@ -18,6 +19,7 @@ export default function Abrir() {
   const [reveladas, setReveladas] = useState(0)
   const [erro, setErro] = useState<string | null>(null)
   const [ocupado, setOcupado] = useState(false)
+  const [emFoco, setEmFoco] = useState<number | null>(null)
 
   if (!jogador) return null
 
@@ -28,7 +30,7 @@ export default function Abrir() {
   ]
 
   async function abrir(tipo: TipoPacote) {
-    setErro(null); setOcupado(true); setRes(null); setReveladas(0)
+    setErro(null); setOcupado(true); setRes(null); setReveladas(0); setEmFoco(null)
     const { data, error } = await supabase.rpc('open_pack', { pack_type: tipo })
     setOcupado(false)
     if (error) return setErro(error.message)
@@ -90,7 +92,7 @@ export default function Abrir() {
               <div key={c.copy_id} className="relative">
                 {i < reveladas ? (
                   <>
-                    <Figurinha carta={c} />
+                    <Figurinha carta={c} interativa onClick={() => setEmFoco(i)} />
                     <div className="mt-1 flex flex-wrap gap-1 text-[10px]">
                       {c.estreia_mundial && <Etiqueta cor="bg-yellow-600">ESTREIA MUNDIAL</Etiqueta>}
                       {c.nova && !c.estreia_mundial && <Etiqueta cor="bg-emerald-700">NOVA</Etiqueta>}
@@ -111,6 +113,15 @@ export default function Abrir() {
             ))}
           </div>
         </section>
+      )}
+
+      {res && emFoco !== null && emFoco < reveladas && (
+        <CartaAberta
+          lista={res.cartas.slice(0, reveladas)}
+          indice={emFoco}
+          aoFechar={() => setEmFoco(null)}
+          aoNavegar={setEmFoco}
+        />
       )}
     </div>
   )

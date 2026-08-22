@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useSessao } from '../lib/sessao'
 import { Figurinha } from '../componentes/Figurinha'
+import { CartaAberta } from '../componentes/CartaAberta'
 import { ROTULO_TIER, TIERS, type Carta, type Selo, type Tier } from '../lib/tipos'
 
 /** Repetidas do mesmo card_type empilham. A da frente é a de melhor serial:
@@ -21,6 +22,7 @@ export default function Colecao() {
   const [tier, setTier] = useState<'todos' | Tier>('todos')
   const [selo, setSelo] = useState<'todos' | Exclude<Selo, 'none'> | 'nenhum'>('todos')
   const [aberta, setAberta] = useState<string | null>(null)
+  const [emFoco, setEmFoco] = useState<number | null>(null)
 
   useEffect(() => {
     if (!jogador) return
@@ -68,6 +70,10 @@ export default function Colecao() {
         a.copias[0].character_slug.localeCompare(b.copias[0].character_slug))
   }, [cartas, personagem, tier, selo])
 
+  // O overlay navega pela lista inteira que está na tela, na mesma ordem
+  // das pilhas — seta pra direita continua de onde o olho parou.
+  const planas = pilhas.flatMap((p) => p.copias)
+
   if (erro) return <p className="p-6 text-red-400">{erro}</p>
   if (!cartas) return <p className="p-6 text-neutral-500">carregando…</p>
 
@@ -99,7 +105,9 @@ export default function Colecao() {
               <Figurinha
                 carta={copias[0]}
                 tamanho="miniatura"
-                onClick={() => setAberta(aberta === chave ? null : chave)}
+                onClick={() => copias.length === 1
+                  ? setEmFoco(planas.indexOf(copias[0]))
+                  : setAberta(aberta === chave ? null : chave)}
               />
               {copias.length > 1 && (
                 <span className="absolute -right-1 -top-1 rounded-full bg-neutral-100 px-1.5 py-0.5
@@ -112,13 +120,17 @@ export default function Colecao() {
               {aberta === chave && (
                 <ul className="mt-1 rounded border border-neutral-700 bg-neutral-900 p-1.5 text-[11px]">
                   {copias.map((c) => (
-                    <li key={c.copy_id} className="flex justify-between gap-2 py-0.5 font-mono tabular-nums">
-                      <span className="text-neutral-300">
-                        {c.origin === 'forge'
-                          ? `FORJADA ${c.forge_index}`
-                          : `${c.serial_number}/${c.print_run}`}
-                      </span>
-                      {c.seal !== 'none' && <span className="text-neutral-500">selo {c.seal}</span>}
+                    <li key={c.copy_id}>
+                      <button onClick={() => setEmFoco(planas.indexOf(c))}
+                        className="flex w-full justify-between gap-2 py-0.5 font-mono tabular-nums
+                                   hover:text-white">
+                        <span className="text-neutral-300">
+                          {c.origin === 'forge'
+                            ? `FORJADA ${c.forge_index}`
+                            : `${c.serial_number}/${c.print_run}`}
+                        </span>
+                        {c.seal !== 'none' && <span className="text-neutral-500">selo {c.seal}</span>}
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -126,6 +138,15 @@ export default function Colecao() {
             </div>
           ))}
         </div>
+      )}
+
+      {emFoco !== null && planas[emFoco] && (
+        <CartaAberta
+          lista={planas}
+          indice={emFoco}
+          aoFechar={() => setEmFoco(null)}
+          aoNavegar={setEmFoco}
+        />
       )}
     </div>
   )

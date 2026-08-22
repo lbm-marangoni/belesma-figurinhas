@@ -1,0 +1,261 @@
+/* Efeito 3D da figurinha (spec §12). CSS puro — nada de Three.js nem WebGL.
+ *
+ * O JS só escreve quatro variáveis no palco:
+ *   --rx, --ry   rotação em graus
+ *   --px, --py   posição do ponteiro em % dentro da carta (0–100)
+ * Todo o resto é CSS. Isso mantém o cálculo num lugar só e evita que cada
+ * camada faça sua própria conta.
+ */
+
+.palco {
+  perspective: 900px;
+  perspective-origin: 50% 50%;
+}
+
+.carta3d {
+  position: relative;
+  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transform-style: preserve-3d;
+  transition: transform 120ms ease-out;
+  will-change: transform;
+  /* isolation no pai das camadas: os blend modes abaixo não podem vazar
+     para o resto da página (spec §12) */
+  isolation: isolate;
+  overflow: hidden;
+}
+.carta3d.solta { transition: transform 450ms cubic-bezier(.2,.8,.2,1); }
+
+/* Toda camada é filha DIRETA do container com overflow:hidden e herda o
+   border-radius. Sem isso o glare vaza no canto arredondado. */
+.camada {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- glare
+ * radial-gradient CIRCULAR com raio fixo e queda suave. Nunca retângulo,
+ * nunca borda visível — é o erro clássico (spec §12). */
+.glare {
+  background: radial-gradient(
+    circle 38% at var(--px, 50%) var(--py, 50%),
+    rgba(255, 255, 255, 0.42) 0%,
+    rgba(255, 255, 255, 0.16) 32%,
+    rgba(255, 255, 255, 0.04) 58%,
+    rgba(255, 255, 255, 0) 78%
+  );
+  mix-blend-mode: soft-light;
+}
+.glare-suave { opacity: 0.55; }
+
+/* ---------------------------------------------------------------- holo leve
+ * rara, epica. background-position atrelado ao ângulo. */
+.holo-leve {
+  background-image: repeating-linear-gradient(
+    115deg,
+    rgba(255, 119, 115, 0.16) 0%,
+    rgba(255, 237, 95, 0.14) 8%,
+    rgba(168, 255, 95, 0.14) 16%,
+    rgba(131, 255, 247, 0.14) 24%,
+    rgba(120, 148, 255, 0.16) 32%,
+    rgba(216, 117, 255, 0.14) 40%,
+    rgba(255, 119, 115, 0.16) 48%
+  );
+  background-size: 260% 260%;
+  background-position: calc(var(--px, 50%) * 1.4) calc(var(--py, 50%) * 1.4);
+  mix-blend-mode: color-dodge;
+  opacity: 0.5;
+}
+
+/* -------------------------------------------------------- metálico deslizante
+ * lendaria, mitica. Uma faixa especular que corre com o ângulo. */
+.metalico {
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(255, 245, 200, 0.06) 42%,
+    rgba(255, 250, 224, 0.55) 50%,
+    rgba(255, 245, 200, 0.06) 58%,
+    transparent 70%
+  );
+  background-size: 240% 240%;
+  background-position: calc(100% - var(--px, 50%) * 2) center;
+  mix-blend-mode: overlay;
+}
+
+/* ------------------------------------------------------- holo de textura fina
+ * cosmica, divina. Cobre a figurinha inteira, grão pequeno. */
+.holo-fino {
+  background-image:
+    repeating-linear-gradient(
+      0deg, rgba(255,255,255,0.05) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(
+      70deg,
+      rgba(140, 220, 255, 0.20) 0%,
+      rgba(196, 140, 255, 0.20) 12%,
+      rgba(120, 255, 214, 0.20) 24%,
+      rgba(140, 220, 255, 0.20) 36%
+    );
+  background-size: 100% 100%, 320% 320%;
+  background-position: 0 0, calc(var(--px, 50%) * 1.8) calc(var(--py, 50%) * 1.8);
+  mix-blend-mode: color-dodge;
+  opacity: 0.62;
+}
+
+/* ---------------------------------------------------------------- brasa
+ * infernal. Pulsa devagar; o ponteiro só desloca o núcleo. */
+.brasa {
+  background: radial-gradient(
+    circle 55% at var(--px, 50%) var(--py, 50%),
+    rgba(255, 138, 42, 0.55) 0%,
+    rgba(214, 48, 20, 0.30) 38%,
+    rgba(90, 10, 0, 0.10) 66%,
+    transparent 82%
+  );
+  mix-blend-mode: screen;
+  animation: pulsar 2.4s ease-in-out infinite;
+}
+@keyframes pulsar {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 0.95; }
+}
+
+/* ---------------------------------------------------------------- halo aura
+ * O mais intenso de todos (spec §12). */
+/* O mais intenso de todos, mas em ANEL: a versao anterior usava color-dodge
+   cobrindo a carta inteira e, como a arte da aura-branca e quase branca, o
+   resultado estourava para branco puro e sumia com a figurinha. Agora o
+   miolo fica limpo por mascara e a intensidade vive na borda. */
+.halo-aura {
+  background: conic-gradient(from calc(var(--px, 50) * 3.6deg) at 50% 50%,
+    #ff2fb3, #ffd166, #4cffb0, #4cc9ff, #b06cff, #ff2fb3);
+  mix-blend-mode: screen;
+  opacity: 0.85;
+  -webkit-mask-image: radial-gradient(circle 62% at 50% 50%, transparent 30%, #000 78%);
+  mask-image: radial-gradient(circle 62% at 50% 50%, transparent 30%, #000 78%);
+  filter: saturate(1.4);
+}
+.halo-aura-brilho {
+  background: radial-gradient(circle 34% at var(--px, 50%) var(--py, 50%),
+    rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.12) 45%, transparent 72%);
+  mix-blend-mode: overlay;
+}
+
+/* ---------------------------------------------------------------- diamante
+ * Cintilação de facetas. */
+.facetas {
+  background-image:
+    repeating-conic-gradient(from 0deg at 30% 30%,
+      rgba(255,255,255,0.3) 0deg 4deg, transparent 4deg 26deg),
+    repeating-conic-gradient(from 45deg at 72% 66%,
+      rgba(190,240,255,0.3) 0deg 3deg, transparent 3deg 24deg),
+    radial-gradient(circle 26% at var(--px, 50%) var(--py, 50%),
+      rgba(255,255,255,0.55), transparent 70%);
+  mix-blend-mode: overlay;
+  opacity: 0.45;
+  /* mascara: cintilacao em dois focos, nao um veu sobre a arte inteira */
+  -webkit-mask-image:
+    radial-gradient(circle 30% at 30% 30%, #000 0%, transparent 72%),
+    radial-gradient(circle 26% at 72% 66%, #000 0%, transparent 72%),
+    radial-gradient(circle 30% at var(--px, 50%) var(--py, 50%), #000 0%, transparent 75%);
+  mask-image:
+    radial-gradient(circle 30% at 30% 30%, #000 0%, transparent 72%),
+    radial-gradient(circle 26% at 72% 66%, #000 0%, transparent 72%),
+    radial-gradient(circle 30% at var(--px, 50%) var(--py, 50%), #000 0%, transparent 75%);
+  -webkit-mask-composite: source-over;
+  mask-composite: add;
+  animation: cintilar 3.2s steps(6, end) infinite;
+}
+@keyframes cintilar {
+  0%, 100% { filter: brightness(1); }
+  50%      { filter: brightness(1.45); }
+}
+
+/* ---------------------------------------------------------------- prisma
+ * Oil-slick iridescente, 1/1. */
+.oil-slick {
+  background-image: conic-gradient(
+    from calc(var(--px, 50) * 7.2deg) at calc(var(--px, 50%)) calc(var(--py, 50%)),
+    #ff006e, #fb5607, #ffbe0b, #8ac926, #00b4d8, #7209b7, #ff006e
+  );
+  background-size: 180% 180%;
+  mix-blend-mode: color-dodge;
+  opacity: 0.55;
+  filter: saturate(1.6) blur(0.4px);
+}
+
+/* ================================================================ desgaste
+ * Spec §19.2. Cosmético — nunca esconde a arte a ponto de não dar para ver
+ * qual figurinha é. */
+.desgaste-1 {
+  background-image:
+    repeating-linear-gradient(74deg,
+      rgba(0,0,0,0.30) 0 1.5px, rgba(255,255,255,0.16) 1.5px 3px, transparent 3px 26px),
+    repeating-linear-gradient(-58deg,
+      rgba(0,0,0,0.22) 0 1px, rgba(255,255,255,0.12) 1px 2px, transparent 2px 34px),
+    linear-gradient(0deg, rgba(150,130,80,0.16), rgba(150,130,80,0.16));
+  mix-blend-mode: hard-light;
+  opacity: 0.85;
+}
+.desgaste-2 {
+  background-image:
+    radial-gradient(ellipse 24% 16% at 18% 74%, rgba(86,62,28,0.72), transparent 72%),
+    radial-gradient(ellipse 18% 22% at 82% 26%, rgba(70,52,22,0.68), transparent 72%),
+    radial-gradient(circle at 2% 2%,  rgba(0,0,0,0.85), transparent 15%),
+    radial-gradient(circle at 98% 2%, rgba(0,0,0,0.7),  transparent 13%),
+    radial-gradient(circle at 2% 98%, rgba(0,0,0,0.8),  transparent 14%),
+    radial-gradient(circle at 98% 98%,rgba(0,0,0,0.75), transparent 15%),
+    repeating-linear-gradient(74deg,
+      rgba(0,0,0,0.28) 0 1.5px, rgba(255,255,255,0.1) 1.5px 3px, transparent 3px 20px),
+    linear-gradient(0deg, rgba(150,125,60,0.24), rgba(150,125,60,0.24));
+  mix-blend-mode: multiply;
+}
+.desgaste-3 {
+  background-image:
+    /* manchas, cantos comidos e vincos, herdados do nivel 2 */
+    radial-gradient(ellipse 26% 18% at 20% 72%, rgba(78,54,20,0.8), transparent 72%),
+    radial-gradient(ellipse 20% 24% at 84% 28%, rgba(64,46,18,0.75), transparent 72%),
+    radial-gradient(circle at 2% 2%,  rgba(0,0,0,0.9), transparent 18%),
+    radial-gradient(circle at 98% 2%, rgba(0,0,0,0.8), transparent 16%),
+    radial-gradient(circle at 2% 98%, rgba(0,0,0,0.9), transparent 18%),
+    radial-gradient(circle at 98% 98%,rgba(0,0,0,0.85),transparent 17%),
+    repeating-linear-gradient(74deg,
+      rgba(0,0,0,0.34) 0 1.5px, rgba(255,255,255,0.12) 1.5px 3px, transparent 3px 16px),
+    /* amarelado forte */
+    linear-gradient(0deg, rgba(196,152,52,0.42), rgba(196,152,52,0.42));
+  mix-blend-mode: multiply;
+}
+/* Os rasgos vao numa camada propria: precisam de mascara para nao
+   atravessarem a carta inteira, e de borda clara de um lado - e isso que
+   diferencia rasgo de risco de caneta. */
+.desgaste-3-rasgo {
+  background-image:
+    linear-gradient(104deg, transparent 45.2%,
+      rgba(232,214,178,0.85) 45.6%, rgba(232,214,178,0.85) 46.4%,
+      rgba(18,12,5,0.92) 46.6%, rgba(18,12,5,0.92) 48.4%, transparent 48.8%),
+    linear-gradient(14deg, transparent 76.4%,
+      rgba(232,214,178,0.8) 76.8%, rgba(232,214,178,0.8) 77.5%,
+      rgba(18,12,5,0.9) 77.7%, rgba(18,12,5,0.9) 79%, transparent 79.4%);
+  -webkit-mask-image:
+    linear-gradient(104deg, transparent 8%, #000 22%, #000 58%, transparent 72%),
+    linear-gradient(14deg, transparent 55%, #000 68%, #000 92%, transparent 100%);
+  mask-image:
+    linear-gradient(104deg, transparent 8%, #000 22%, #000 58%, transparent 72%),
+    linear-gradient(14deg, transparent 55%, #000 68%, #000 92%, transparent 100%);
+  -webkit-mask-composite: source-over;
+  mask-composite: add;
+}
+
+/* ================================================================ acessibilidade
+ * Spec §12: sem tilt, sem partículas, sem tremor. */
+@media (prefers-reduced-motion: reduce) {
+  .carta3d { transform: none !important; transition: none !important; }
+  .brasa, .facetas { animation: none !important; }
+  .glare, .holo-leve, .metalico, .holo-fino, .halo-aura, .oil-slick {
+    /* deixa o brilho parado no centro em vez de sumir: a identidade do tier
+       continua legível, só não se mexe */
+    --px: 50%;
+    --py: 50%;
+  }
+}
