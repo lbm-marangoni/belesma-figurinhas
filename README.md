@@ -20,7 +20,11 @@ supabase/migrations/
 scripts/
   verificar-fase1.mjs         roda as migrações num Postgres real (PGlite) e
                               confere contagens, selos, RLS e idempotência
+  fraude-http.mjs             o mesmo teste de fraude, mas contra o Supabase
+                              real, por HTTP e com JWT do Auth
   check-assets.mjs            confere as artes contra o catálogo (spec §3)
+  importar-assets.mjs         traz as artes de "../belesma new", renomeia para
+                              o padrão e reconstrói o alfa dos selos
 ```
 
 ## Rodar as verificações
@@ -30,15 +34,13 @@ npm run verificar:fase1     # Postgres local (PGlite), sem Docker
 node scripts/fraude-http.mjs  # contra o Supabase de verdade, por HTTP
 ```
 
-O segundo precisa de `SUPABASE_SERVICE_ROLE_KEY` no ambiente — só para criar
-o jogador cobaia. As tentativas de fraude usam exclusivamente a anon key.
+O primeiro sobe um Postgres em WASM e aplica **as mesmas migrações** que vão
+para o Supabase — não precisa de Docker. Ele não cobre PostgREST nem o JWT do
+Auth; `auth.uid()` é um stub que lê a mesma GUC que o Supabase usa.
 
-Sobe um Postgres em WASM, aplica **as mesmas migrações** que vão para o
-Supabase e testa. Não precisa de Docker nem de projeto no ar.
-
-O que ele não cobre: a camada HTTP do PostgREST e o JWT do Supabase Auth.
-`auth.uid()` é um stub que lê a mesma GUC que o Supabase usa, então as
-policies são exercitadas de verdade, mas o transporte não.
+O segundo fecha esse buraco: roda contra o projeto de verdade, por HTTP, com
+JWT real. Precisa de `SUPABASE_SERVICE_ROLE_KEY` no ambiente, e só para criar
+o jogador cobaia — as tentativas de fraude usam exclusivamente a anon key.
 
 ## No ar
 
