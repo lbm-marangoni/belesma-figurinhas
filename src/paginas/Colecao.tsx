@@ -39,7 +39,7 @@ export default function Colecao() {
     {
       const { data, error } = await supabase
         .from('card_copies')
-        .select(`copy_id:id, serial_number, seal, origin, damage_level, forge_index, verify_code,
+        .select(`copy_id:id, card_type_id, serial_number, seal, origin, damage_level, forge_index, verify_code,
                  card_types!inner ( print_run, tier, tier_order, skin, art_path,
                                     characters!inner ( slug, name ) )`)
         .eq('owner_id', jogador.id)
@@ -47,7 +47,8 @@ export default function Colecao() {
       if (error) return setErro(error.message)
 
       setCartas((data ?? []).map((r: any) => ({
-        copy_id: r.copy_id, serial_number: r.serial_number, seal: r.seal,
+        copy_id: r.copy_id, card_type_id: r.card_type_id,
+        serial_number: r.serial_number, seal: r.seal,
         origin: r.origin, damage_level: r.damage_level, forge_index: r.forge_index,
         verify_code: r.verify_code, print_run: r.card_types.print_run,
         tier: r.card_types.tier, tier_order: r.card_types.tier_order,
@@ -285,6 +286,7 @@ export default function Colecao() {
           indice={emFoco}
           aoFechar={() => setEmFoco(null)}
           aoNavegar={setEmFoco}
+          aoMudar={recarregarAcervo}
         />
       )}
     </div>

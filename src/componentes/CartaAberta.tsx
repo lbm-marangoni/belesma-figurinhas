@@ -19,17 +19,23 @@ type Dono = { kind: string; created_at: string; de: string | null; para: string 
  * implementação do render.
  */
 export function CartaAberta({
-  lista, indice, aoFechar, aoNavegar,
+  lista, indice, aoFechar, aoNavegar, aoMudar,
 }: {
   lista: Carta[]
   indice: number
   aoFechar: () => void
   aoNavegar: (i: number) => void
+  /** chamado depois de vender, para a tela de trás se atualizar */
+  aoMudar?: () => void
 }) {
   const carta = lista[indice]
   const [historico, setHistorico] = useState<Dono[] | null>(null)
   const [giroLiberado, setGiroLiberado] = useState(!giroscopioPrecisaDePermissao())
-  const { jogador } = useSessao()
+  const { jogador, recarregar } = useSessao()
+  const [quantas, setQuantas] = useState(0)      // quantas você tem deste tipo
+  const [confirmando, setConfirmando] = useState(false)
+  const [aviso, setAviso] = useState<string | null>(null)
+  const [vendendo, setVendendo] = useState(false)
   const dialogo = useRef<HTMLDivElement>(null)
   const focoAnterior = useRef<HTMLElement | null>(null)
   const toqueX = useRef<number | null>(null)
@@ -80,7 +86,31 @@ export function CartaAberta({
     })()
   }, [carta.copy_id])
 
+  // quantas cópias deste tipo você tem: a última nunca se vende (spec §19.4)
+  useEffect(() => {
+    setConfirmando(false); setAviso(null)
+    if (!jogador) return
+    supabase.from('card_copies')
+      .select('id, card_types!inner(id)', { count: 'exact', head: true })
+      .eq('owner_id', jogador.id).eq('burned', false)
+      .eq('card_type_id', (carta as any).card_type_id ?? -1)
+      .then(({ count }) => setQuantas(count ?? 0))
+  }, [carta.copy_id, jogador])
+
   const cor = COR_TIER[carta.tier]
+  const minha = !!jogador && quantas > 0
+  const podeVender = minha && quantas > 1 && carta.seal === 'none' && carta.tier !== 'prisma'
+
+  async function vender() {
+    setVendendo(true); setAviso(null)
+    const { data, error } = await supabase.rpc('vender', { p_copy_id: carta.copy_id })
+    setVendendo(false); setConfirmando(false)
+    if (error) return setAviso(error.message)
+    await recarregar()
+    aoMudar?.()
+    setAviso(`Vendida por ${(data as any).valor} baba.`)
+    setTimeout(aoFechar, 900)
+  }
   const rotuloOrigem: Record<string, string> = {
     pull: 'puxada de pacote', daily: 'pacote diário', trade: 'troca',
     forge: 'forjada', sell: 'vendida ao pool', admin_reset: 'devolvida ao pool',
@@ -138,6 +168,44 @@ export function CartaAberta({
             O código <span className="font-mono">{carta.verify_code}</span> abre a página do dono atual.
           </p>
 
+          {/* ---------------------------------------------------------- vender */}
+          {minha && (
+            <div className="mt-3">
+              {!confirmando ? (
+                <button onClick={() => setConfirmando(true)} disabled={!podeVender}
+                  className="btn btn-fraco w-full">
+                  vender
+                </button>
+              ) : (
+                <div className="painel border-amber-900 p-3 text-left">
+                  <p className="text-xs leading-snug text-amber-300">
+                    Ela volta ao pool <strong>marcada com desgaste</strong> e outra pessoa pode
+                    puxá-la em pacote. {carta.origin === 'forge'
+                      ? 'Forjada vale 40% e é queimada de vez.'
+                      : 'Isto não se desfaz.'}
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button onClick={vender} disabled={vendendo} className="btn btn-perigo flex-1">
+                      {vendendo ? '...' : 'confirmar venda'}
+                    </button>
+                    <button onClick={() => setConfirmando(false)} className="btn btn-fraco">
+                      voltar
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!podeVender && (
+                <p className="mt-1 text-[11px] text-neutral-600">
+                  {carta.seal !== 'none' ? 'Figurinha selada não se vende.'
+                    : carta.tier === 'prisma' ? 'Prisma não se vende.'
+                    : 'Sua única cópia deste tipo — não dá para vender.'}
+                </p>
+              )}
+              {aviso && <p className="mt-2 rounded-lg p-2 text-xs aviso-ok">{aviso}</p>}
+            </div>
+          )}
+
           {!giroLiberado && (
             <button
               onClick={async () => setGiroLiberado(await pedirGiroscopio())}
@@ -154,8 +222,9 @@ export function CartaAberta({
               <h2 className="text-xl font-semibold">{carta.character_name}</h2>
               <p className="text-neutral-400">{carta.skin}</p>
             </div>
-            <button onClick={aoFechar} aria-label="fechar"
-              className="rounded border border-neutral-700 px-2 py-0.5 text-neutral-400">esc</button>
+            <button onClick={aoFechar} aria-label="fechar" className="btn btn-fraco shrink-0 py-1">
+              fechar
+            </button>
           </div>
 
           <dl className="mt-4 divide-y divide-neutral-800 border-y border-neutral-800">

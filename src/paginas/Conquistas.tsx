@@ -105,7 +105,7 @@ export default function Conquistas() {
   if (!indice) return <p className="p-6 text-neutral-500">carregando…</p>
 
   return (
-    <div className="mx-auto max-w-5xl space-y-8 p-4 sm:p-6">
+    <div className="mx-auto max-w-[112rem] space-y-10 p-4 sm:px-8 sm:py-6">
       {/* ------------------------------------------------------ índice global */}
       <section>
         <h2 className="text-lg font-semibold tracking-tight">
@@ -138,8 +138,8 @@ export default function Conquistas() {
               </button>
 
               {/* a fileira de figurinhas do personagem, sempre visível */}
-              <div className="grid grid-cols-9 gap-1 border-t border-neutral-900 px-3 py-2
-                              sm:grid-cols-14 md:grid-cols-[repeat(27,minmax(0,1fr))]">
+              <div className="grid grid-cols-7 gap-1.5 border-t border-neutral-900 px-3 py-3
+                              sm:grid-cols-14 sm:gap-2 lg:grid-cols-[repeat(27,minmax(0,1fr))]">
                 {p.tipos.map((t) => (
                   <Selo key={t.skin} personagem={p.slug} skin={t.skin} tier={t.tier}
                         descoberto={t.descoberto}
@@ -218,7 +218,7 @@ export default function Conquistas() {
         <table className="w-full text-left text-sm">
           <thead className="text-neutral-500">
             <tr className="border-b border-neutral-800">
-              <th className="py-1 font-normal">jogador</th>
+              <th className="w-1/4 py-1 font-normal">jogador</th>
               <th className="text-right font-normal">selos</th>
               <th className="text-right font-normal">nº 1</th>
               <th className="text-right font-normal">melhor serial</th>
@@ -249,7 +249,7 @@ export default function Conquistas() {
         {vitrines.length === 0 ? (
           <p className="text-sm text-neutral-600">ninguém montou vitrine ainda</p>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
             {vitrines.map((v) => (
               <div key={v.nickname} className="rounded border border-neutral-800 p-3">
                 <p className="mb-2 text-sm font-medium">{v.nickname}</p>

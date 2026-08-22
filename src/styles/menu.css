@@ -129,7 +129,9 @@
 
 .indice-linha {
   display: grid;
-  grid-template-columns: minmax(6rem, 1.4fr) 5.5rem minmax(5rem, .9fr) minmax(7rem, 1.1fr);
+  /* fracoes, nao larguras fixas: numa tela larga a barra de distribuicao
+     cresce junto em vez de sobrar um deserto no meio da linha */
+  grid-template-columns: minmax(6rem, 1.1fr) 5.5rem minmax(8rem, 2fr) minmax(8rem, 1.2fr);
   align-items: center;
   gap: .5rem;
   padding: .28rem .7rem;

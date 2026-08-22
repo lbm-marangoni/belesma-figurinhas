@@ -22,6 +22,8 @@ export type Jogador = {
  *  o componente de figurinha é único no projeto (spec §11). */
 export type Carta = {
   copy_id: number
+  /** necessário para contar suas cópias do mesmo tipo (vender, colar, trocar) */
+  card_type_id?: number
   serial_number: number
   print_run: number
   seal: Selo

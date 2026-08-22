@@ -361,7 +361,7 @@ export default function Album() {
 
       {emFoco && (
         <CartaAberta lista={[emFoco]} indice={0}
-          aoFechar={() => setEmFoco(null)} aoNavegar={() => {}} />
+          aoFechar={() => setEmFoco(null)} aoNavegar={() => {}} aoMudar={carregar} />
       )}
     </div>
   )

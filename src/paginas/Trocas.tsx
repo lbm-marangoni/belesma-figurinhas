@@ -24,7 +24,7 @@ type Proposta = {
 }
 
 const daLinha = (r: any): Carta => ({
-  copy_id: r.id, serial_number: r.serial_number, seal: r.seal, origin: r.origin,
+  copy_id: r.id, card_type_id: r.card_type_id, serial_number: r.serial_number, seal: r.seal, origin: r.origin,
   damage_level: r.damage_level, forge_index: r.forge_index, verify_code: r.verify_code,
   print_run: r.card_types.print_run, tier: r.card_types.tier,
   tier_order: r.card_types.tier_order, skin: r.card_types.skin, art_path: '',
@@ -32,7 +32,7 @@ const daLinha = (r: any): Carta => ({
   character_name: r.card_types.characters.name,
 })
 const SELECT_CARTA =
-  `id, serial_number, seal, origin, damage_level, forge_index, verify_code,
+  `id, card_type_id, serial_number, seal, origin, damage_level, forge_index, verify_code,
    card_types!inner ( print_run, tier, tier_order, skin, characters!inner ( slug, name ) )`
 
 export default function Trocas() {

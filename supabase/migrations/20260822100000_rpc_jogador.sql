@@ -394,6 +394,7 @@ begin
   from (
     select jsonb_build_object(
       'copy_id', cc.id,
+      'card_type_id', cc.card_type_id,
       'reveal_index', poc.reveal_index,
       'from_hit_table', poc.from_hit_table,
       'garantido', poc.garantido,

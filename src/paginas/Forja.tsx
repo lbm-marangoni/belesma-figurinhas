@@ -31,13 +31,14 @@ export default function Forja() {
     if (!jogador) return
     const [cc, ts] = await Promise.all([
       supabase.from('card_copies').select(
-        `copy_id:id, serial_number, seal, origin, damage_level, forge_index, verify_code,
+        `copy_id:id, card_type_id, serial_number, seal, origin, damage_level, forge_index, verify_code,
          card_types!inner ( print_run, tier, tier_order, skin, characters!inner ( slug, name ) )`)
         .eq('owner_id', jogador.id).eq('burned', false).order('id'),
       supabase.from('tiers').select('slug, tier_order, forjavel').order('tier_order'),
     ])
     setAcervo((cc.data ?? []).map((r: any) => ({
-      copy_id: r.copy_id, serial_number: r.serial_number, seal: r.seal, origin: r.origin,
+      copy_id: r.copy_id, card_type_id: r.card_type_id,
+      serial_number: r.serial_number, seal: r.seal, origin: r.origin,
       damage_level: r.damage_level, forge_index: r.forge_index, verify_code: r.verify_code,
       print_run: r.card_types.print_run, tier: r.card_types.tier,
       tier_order: r.card_types.tier_order, skin: r.card_types.skin, art_path: '',
@@ -79,7 +80,8 @@ export default function Forja() {
     if (nova) {
       const r: any = nova
       setResultado({
-        copy_id: r.copy_id, serial_number: r.serial_number, seal: r.seal, origin: r.origin,
+        copy_id: r.copy_id, card_type_id: r.card_type_id,
+      serial_number: r.serial_number, seal: r.seal, origin: r.origin,
         damage_level: r.damage_level, forge_index: r.forge_index, verify_code: r.verify_code,
         print_run: r.card_types.print_run, tier: r.card_types.tier,
         tier_order: r.card_types.tier_order, skin: r.card_types.skin, art_path: '',

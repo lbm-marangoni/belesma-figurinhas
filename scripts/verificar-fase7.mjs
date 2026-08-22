@@ -118,11 +118,18 @@ const dar = async (uid, tier, n, off = 0) => (await tudo(`
 // precisam ser card_types DIFERENTES: o bonus so paga quando o lado que
 // recebe fica com um tipo do qual tinha zero. Com o mesmo tipo dos dois
 // lados nao ha colecao nova para ninguem - e o teste testaria a coisa errada.
+// ...e nenhum dos dois pode JA TER o tipo do outro. O pacote diario aberto
+// acima pode ter dado uma rara para a ana; se calhar de ser o mesmo tipo, ela
+// nao recebe bonus e o teste falha por sorte, nao por bug. Foi o que piscou
+// no CI.
 const doisTipos = await tudo(`
   select min(cc.id) as id, cc.card_type_id from card_copies cc
   join card_types ct on ct.id = cc.card_type_id
   where ct.tier = 'rara' and cc.owner_id is null
-  group by cc.card_type_id order by cc.card_type_id limit 2`)
+    and not exists (select 1 from card_copies o
+                    where o.card_type_id = cc.card_type_id
+                      and o.owner_id in ($1, $2))
+  group by cc.card_type_id order by cc.card_type_id limit 2`, [A, B])
 const ca = doisTipos[0], cb = doisTipos[1]
 await db.exec(`update card_copies set owner_id='${A}', claimed_at=now() where id=${ca.id};`)
 await db.exec(`update card_copies set owner_id='${B}', claimed_at=now() where id=${cb.id};`)
