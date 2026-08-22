@@ -109,7 +109,13 @@ await como(UID.chefe, `select public.grant_packs('ana','ultra',50)`)
 
 const est = { comum: 0, raro: 0, ultra: 0 }
 const tiersHit = {}
-let quentes = 0, bonus = 0, promovidos = 0, repetidoNoPacote = 0, cartas = 0
+let quentes = 0, bonus = 0, promovidos = 0, cartas = 0
+// A spec §8 permite repetir card_type SO quando o tier nao tem tipos
+// distintos suficientes para os slots sorteados dele. Ex.: pacote quente
+// sorteia 4 slots de mitica, e mitica tem 3 tipos (um por personagem).
+const tiposPorTier = Object.fromEntries((await tudo(
+  `select tier, count(*) as n from card_types group by tier`)).map((r) => [r.tier, Number(r.n)]))
+let repetidoIlegal = 0, repetidoLegitimo = 0
 let raroAbaixo = 0, ultraAbaixo = 0, duroEmGarantido = 0
 
 const ordem = Object.fromEntries((await tudo(`select slug, tier_order from tiers`))
@@ -123,7 +129,14 @@ for (const [tipo, n] of [['comum', 300], ['raro', 100], ['ultra', 50]]) {
     if (r.quente) quentes++
     if (r.bonus) bonus++
     promovidos += r.promovidos
-    if (new Set(r.cartas.map((c) => c.skin + '|' + c.character_slug)).size !== r.cartas.length) repetidoNoPacote++
+    const chaves = r.cartas.map((c) => c.skin + '|' + c.character_slug)
+    if (new Set(chaves).size !== chaves.length) {
+      // quantos slots sairam de cada tier neste pacote
+      const porTier = {}
+      for (const c of r.cartas) porTier[c.tier] = (porTier[c.tier] ?? 0) + 1
+      const forcado = Object.entries(porTier).some(([t, n]) => n > tiposPorTier[t])
+      if (forcado) repetidoLegitimo++; else repetidoIlegal++
+    }
 
     const hit = r.cartas.filter((c) => c.from_hit_table)
     const melhor = Math.max(...r.cartas.map((c) => ordem[c.tier]))
@@ -141,7 +154,8 @@ for (const [tipo, n] of [['comum', 300], ['raro', 100], ['ultra', 50]]) {
   }
 }
 
-checar('nenhum card_type repetido dentro de um pacote', repetidoNoPacote === 0, `${repetidoNoPacote}`)
+checar('repeticao de card_type so quando o tier esgota os tipos',
+  repetidoIlegal === 0, `${repetidoIlegal} ilegais, ${repetidoLegitimo} forcados pelo tamanho do tier`)
 checar('Raro sempre epica ou melhor', raroAbaixo === 0, `${raroAbaixo} abaixo`)
 checar('Ultra sempre mitica ou melhor', ultraAbaixo === 0, `${ultraAbaixo} abaixo`)
 checar('diamante/prisma nunca em slot garantido', duroEmGarantido === 0, `${duroEmGarantido}`)

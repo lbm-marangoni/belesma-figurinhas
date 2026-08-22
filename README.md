@@ -1,7 +1,7 @@
 # BELESMA — figurinhas
 
 Implementação de `BELESMA-BUILD.md` (a spec mestre, na pasta acima).
-**Estado: Fases 1, 2 e 3 concluídas.** Fase 4 em diante não começou.
+**Estado: Fases 1 a 4 concluídas.** Fase 5 em diante não começou.
 
 Este projeto é novo e separado de `../belesma/`, que é a implementação da spec
 antiga (`BELESMA-SPEC.md`, modelo de cartas com `rarity`). Aquele projeto não
@@ -123,3 +123,17 @@ Medido neste projeto, girando de -12° a +12°:
 
 `src/lib/tilt.ts` usa rect do palco + `offsetWidth`/`offsetHeight` da
 figurinha, derivando a escala de ancestrais por `rect.width / offsetWidth`.
+
+## Abertura de pacote (Fase 4)
+
+`src/componentes/Pacote3D.tsx` + `src/styles/pacote.css`. O pacote tem volume
+de verdade: plano frontal, plano traseiro espelhado e escurecido, e quatro
+faces laterais de 14px em `preserve-3d`.
+
+A linha do rasgo é **sorteada a cada abertura** — duas nunca rasgam igual. As
+duas metades saem de `clip-path` complementares, então não há fresta entre
+elas.
+
+Ordem inegociável: `open_pack` sorteia e grava **antes** de a animação
+começar. Fechar a aba no meio do rasgo não perde figurinha nenhuma; a
+animação é só apresentação. Cada etapa é cancelável com um clique.

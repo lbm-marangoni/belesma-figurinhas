@@ -8,8 +8,12 @@ import '../styles/figurinha.css'
  * revelação de pacote e o overlay de tela cheia usam este mesmo. Nunca criar
  * um segundo — o efeito por tier, o selo e o desgaste são CAMADAS aqui dentro.
  *
- * `interativa` liga tilt e shader. O grid da coleção passa false de propósito:
- * a spec §11 pede miniatura leve, só arte estática.
+ * `interativa` liga tilt E shader. `shader` liga só as camadas do tier, sem
+ * tilt — é o que a carta saindo do pacote usa, porque ali o ponteiro está
+ * comandando a cena e não a figurinha.
+ *
+ * O grid da coleção passa os dois como false de propósito: a spec §11 pede
+ * miniatura leve, só arte estática.
  */
 
 /** Camadas por tier (spec §12). Ordem importa: glare por último fica por cima. */
@@ -37,11 +41,12 @@ export function serialDe(carta: Carta) {
 }
 
 export function Figurinha({
-  carta, tamanho = 'media', interativa = false, onClick, selecionada,
+  carta, tamanho = 'media', interativa = false, shader, onClick, selecionada,
 }: {
   carta: Carta
   tamanho?: 'miniatura' | 'media' | 'grande'
   interativa?: boolean
+  shader?: boolean
   onClick?: () => void
   selecionada?: boolean
 }) {
@@ -84,8 +89,8 @@ export function Figurinha({
         )}
         {carta.damage_level === 3 && <div className="camada desgaste-3-rasgo" aria-hidden />}
 
-        {/* shader do tier — só quando interativa; a miniatura fica leve */}
-        {interativa && camadasDoTier(carta.tier).map((c) => (
+        {/* shader do tier — a miniatura fica leve */}
+        {(shader ?? interativa) && camadasDoTier(carta.tier).map((c) => (
           <div key={c} className={`camada ${c}`} aria-hidden />
         ))}
 
