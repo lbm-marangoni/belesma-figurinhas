@@ -32,7 +32,7 @@ await db.exec(`
   alter default privileges in schema public grant all on sequences to anon, authenticated;
 
   create schema auth;
-  create table auth.users (id uuid primary key, email text);
+  create table auth.users (id uuid primary key, email text, encrypted_password text, updated_at timestamptz);
   create or replace function auth.uid() returns uuid language sql stable as $fn$
     select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
   $fn$;
@@ -174,7 +174,7 @@ await outroBanco.exec(`
   alter default privileges in schema public grant all on tables    to anon, authenticated;
   alter default privileges in schema public grant all on sequences to anon, authenticated;
   create schema auth;
-  create table auth.users (id uuid primary key, email text);
+  create table auth.users (id uuid primary key, email text, encrypted_password text, updated_at timestamptz);
   create or replace function auth.uid() returns uuid language sql stable as $fn$
     select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
   $fn$;

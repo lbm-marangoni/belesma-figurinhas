@@ -26,6 +26,7 @@ jobs:
       - run: npm ci
       - run: npm run check-assets
       - run: npm run verificar:fase1
+      - run: npm run verificar:fase2
       - run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
