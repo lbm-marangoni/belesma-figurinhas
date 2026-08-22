@@ -37,7 +37,30 @@ const TEMAS: Record<Tier, string> = {
   infernal: 'Inferno', aura: 'Auras', diamante: 'Diamante', prisma: 'Prismas 1/1',
 }
 
+/**
+ * Estreito o bastante para uma página só?
+ *
+ * Precisa ser ESTADO, não uma leitura solta no corpo do render: o álbum
+ * decide quantas skins vão em cada página com este valor, e um matchMedia
+ * lido uma vez não muda quando o telefone gira nem quando a janela é
+ * redimensionada — metade das figurinhas sumiria até recarregar.
+ */
+function useEstreito() {
+  const consulta = '(max-width: 768px)'
+  const [estreito, setEstreito] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(consulta).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(consulta)
+    const ouvir = () => setEstreito(mq.matches)
+    ouvir()
+    mq.addEventListener('change', ouvir)
+    return () => mq.removeEventListener('change', ouvir)
+  }, [])
+  return estreito
+}
+
 export default function Album() {
+  const estreito = useEstreito()
   const { jogador } = useSessao()
   const [tipos, setTipos] = useState<Tipo[]>([])
   const [minhas, setMinhas] = useState<Carta[]>([])
@@ -135,6 +158,7 @@ export default function Album() {
   function iniciarGesto(e: React.PointerEvent, carta: Carta, tipo: number) {
     const x0 = e.clientX, y0 = e.clientY
     let virouArraste = false
+    let virouRolagem = false
 
     const mover = (ev: PointerEvent) => {
       const dx = Math.abs(ev.clientX - x0), dy = Math.abs(ev.clientY - y0)
@@ -142,7 +166,14 @@ export default function Album() {
         // deslize horizontal é rolagem do trilho, não arraste: só vira
         // arraste quando o movimento é mais vertical que horizontal
         if (Math.hypot(dx, dy) < 6) return
-        if (dx > dy) { window.removeEventListener('pointermove', mover); return }
+        if (dx > dy) {
+          // ROLOU: marca, senão o pointerup abria o seletor de repetida a
+          // cada deslize lateral. No celular era impossível ver o deck
+          // inteiro — o menu pulava na cara em toda passada de dedo.
+          virouRolagem = true
+          window.removeEventListener('pointermove', mover)
+          return
+        }
         virouArraste = true
         setArrastando(carta)
       }
@@ -153,7 +184,13 @@ export default function Album() {
       window.removeEventListener('pointermove', mover)
       window.removeEventListener('pointerup', soltar)
       window.removeEventListener('pointercancel', soltar)
-      if (!virouArraste) setEscolhendo({ tipo, x: ev.clientX, y: ev.clientY })
+      if (virouArraste || virouRolagem) return
+      // toque seco de verdade, e só quando há o que escolher
+      if ((porTipoNoDeck.get(tipo) ?? []).length > 1) {
+        setEscolhendo({ tipo, x: ev.clientX, y: ev.clientY })
+      } else {
+        setEmFoco(carta)
+      }
     }
     window.addEventListener('pointermove', mover)
     window.addEventListener('pointerup', soltar)
@@ -207,8 +244,8 @@ export default function Album() {
   // No celular a folha não é renderizada (uma página por vez), então
   // onAnimationEnd nunca dispararia e `virando` ficaria preso — o álbum
   // avançava uma vez e travava. Sem folha, a troca é direta.
-  const semAnimacao = typeof window !== 'undefined' &&
-    (window.matchMedia('(max-width: 768px)').matches ||
+  const semAnimacao = estreito ||
+    (typeof window !== 'undefined' &&
      window.matchMedia('(prefers-reduced-motion: reduce)').matches)
 
   const virar = (d: number) => {
@@ -270,11 +307,14 @@ export default function Album() {
       <div className="mesa">
         <div className={`livro tema-${atual.tier}`}>
           {/* esquerda: no avanço já mostra a de destino sendo revelada */}
-          <Pagina spread={virando === 'frente' ? destino : atual} lado="esq" {...props} />
+          <Pagina spread={virando === 'frente' ? destino : atual} lado="esq"
+                  umaPagina={estreito} {...props} />
           {virando === 'frente' && <span className="sombra-varrida" />}
 
-          {/* direita, por baixo: a próxima */}
-          <Pagina spread={virando ? destino : atual} lado="dir" {...props} />
+          {/* direita, por baixo: a próxima. No celular ela não existe — e é
+              melhor não renderizar do que esconder com display:none, senão o
+              conteúdo dela some sem ninguém perceber. */}
+          {!estreito && <Pagina spread={virando ? destino : atual} lado="dir" {...props} />}
 
           {/* a folha que gira sobre a lombada */}
           {virando && (
@@ -308,10 +348,11 @@ export default function Album() {
         <div className="deck">
           <p className="mb-1.5 text-[11px] uppercase tracking-widest text-neutral-500">
             {deck.length > 0
-              ? <>puxe para cima e solte no slot · toque para escolher qual repetida
-                  <span className="ml-2 text-neutral-600">
-                    {porTipoNoDeck.size} tipo(s) — role para o lado
-                  </span></>
+              ? <>puxe <b className="text-neutral-400">para cima</b> e solte no slot ·
+                  deslize <b className="text-neutral-400">para o lado</b> para ver o resto ·
+                  toque na que tem <span className="deck-badge deck-badge-exemplo">n</span> para
+                  escolher qual repetida
+                  <span className="ml-2 text-neutral-600">({porTipoNoDeck.size} tipos)</span></>
               : 'nada para colar nesta página'}
           </p>
           <div className="deck-trilho">
@@ -396,8 +437,11 @@ export default function Album() {
 // ================================================================ página
 function Pagina({
   spread, lado, tipos, coladas, minhas, slotAlvo, colandoAgora, aoAbrir, nua, tipoArrastado,
+  umaPagina,
 }: {
   spread: Spread; lado: 'esq' | 'dir'
+  /** celular: existe só a página esquerda, e ela carrega o spread inteiro */
+  umaPagina?: boolean
   tipos: Tipo[]; coladas: Map<number, Carta>; minhas: Carta[]
   slotAlvo: number | null; colandoAgora: number | null
   aoAbrir: (c: Carta) => void
@@ -410,7 +454,9 @@ function Pagina({
   if (spread.tier === 'selados') {
     const seladas = minhas.filter((c) => c.seal !== 'none').sort((a, b) => a.tier_order - b.tier_order)
     const metade = Math.ceil(seladas.length / 2)
-    const fatia = lado === 'esq' ? seladas.slice(0, metade) : seladas.slice(metade)
+    const fatia = umaPagina
+      ? seladas
+      : lado === 'esq' ? seladas.slice(0, metade) : seladas.slice(metade)
     return (
       <div className={classe}>
         {lado === 'esq' && (
@@ -432,9 +478,14 @@ function Pagina({
 
   const doTier = tipos.filter((t) => t.tier === spread.tier)
   const meio = Math.ceil(spread.skins.length / 2)
-  const skinsAqui = spread.skins.length === 1
+  // O spread divide as skins entre as duas páginas. No celular só a esquerda
+  // existe, então dividir ali APAGA metade do tier — era por isso que
+  // Origens mostrava só chuva e musgo, sem noite nem original.
+  const skinsAqui = umaPagina
     ? (lado === 'esq' ? spread.skins : [])
-    : (lado === 'esq' ? spread.skins.slice(0, meio) : spread.skins.slice(meio))
+    : spread.skins.length === 1
+      ? (lado === 'esq' ? spread.skins : [])
+      : (lado === 'esq' ? spread.skins.slice(0, meio) : spread.skins.slice(meio))
 
   const totalTier = doTier.length
   const feitas = doTier.filter((t) => coladas.has(t.id)).length
@@ -466,7 +517,11 @@ function Pagina({
       {lado === 'esq' && (
         <div className="tema-titulo">
           <h2>{spread.titulo}</h2>
-          <span>{ROTULO_TIER[spread.tier as Tier]} · {feitas}/{totalTier}</span>
+          <span>
+            {ROTULO_TIER[spread.tier as Tier]} · {feitas}/{totalTier}
+            {/* sem página direita não há a placa da tiragem: ela vem para cá */}
+            {umaPagina && doTier[0] && <> · tiragem {doTier[0].print_run}</>}
+          </span>
         </div>
       )}
 

@@ -354,7 +354,9 @@
 @media (max-width: 768px) {
   /* uma página por vez: duas colunas num celular dariam slots de 60px */
   .livro { grid-template-columns: 1fr; box-shadow: 0 0 0 5px #0d0b09, 0 0 0 6px #2a231b; }
-  .livro > .pagina-dir { display: none; }
+  /* a página direita nem é renderizada no celular (ver Album.tsx): o
+     display:none escondia conteúdo real, porque as skins do tier são
+     divididas entre as duas páginas */
   .folha { display: none; }             /* no celular a virada é troca direta */
   .pagina-esq::after, .pagina-dir::after { display: none; }
   .pagina { min-height: auto; padding: 1rem .9rem 1.6rem; border-radius: 4px; }
@@ -373,4 +375,13 @@
   .colando, .colando::after, .moldura-aura, .slot-alvo, .mais-colar, .troca-colar {
     animation: none !important;
   }
+}
+
+/* o contador de repetidas é o alvo do toque que abre o seletor: precisa
+   parecer clicável, não decoração */
+.deck-badge-exemplo {
+  position: static;
+  display: inline-flex;
+  vertical-align: middle;
+  margin: 0 .1rem;
 }

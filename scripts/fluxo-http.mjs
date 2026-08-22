@@ -153,7 +153,6 @@ console.log('\nlimpando...')
 // pack_openings e admin_log - ou seja, GLOBAL. Isso apaga o historico de
 // jogadores de verdade. Script de teste nao pode encostar em dado real.
 await c.rpc('admin_reset_player_collection', { p_nickname: NICK })
-
 const { data: aberturas } = await admin.from('pack_openings').select('id').eq('player_id', pl.id)
 const idsAbertura = (aberturas ?? []).map((a) => a.id)
 if (idsAbertura.length) await admin.from('pack_opening_cards').delete().in('opening_id', idsAbertura)
@@ -162,6 +161,21 @@ await admin.from('copy_history').delete().eq('to_player', pl.id)
 await admin.from('copy_history').delete().eq('from_player', pl.id)
 await admin.from('admin_log').delete().eq('admin_id', pl.id)
 await admin.from('album_colagem').delete().eq('player_id', pl.id)
+
+// ESTREIAS. Antes de apagar a cobaia.
+//
+// open_pack grava first_discovered_at/by na copia e o FK de
+// first_discovered_by e `on delete set null`: apagar a cobaia deixaria a
+// copia marcada como DESCOBERTA sem descobridor - estreia fantasma, que
+// rouba do grupo a chance de fazer a primeira.
+{
+  const { data, error } = await admin.from('card_copies')
+    .update({ first_discovered_at: null, first_discovered_by: null })
+    .eq('first_discovered_by', pl.id)
+    .select('id')
+  if (error) console.log('  ! falhou limpar estreias:', error.message)
+  else if (data?.length) console.log(`  estreias de teste desfeitas: ${data.length}`)
+}
 
 await c.auth.signOut()
 await admin.from('players').delete().eq('id', pl.id)
@@ -174,6 +188,11 @@ const { count: agora } = await admin.from('card_copies')
   .select('id', { count: 'exact', head: true }).not('owner_id', 'is', null)
 checar('o acervo dos jogadores REAIS ficou intacto', agora === comDonoAntes,
   `${comDonoAntes} antes, ${agora} depois`)
+const { count: fantasmas } = await admin.from('card_copies')
+  .select('id', { count: 'exact', head: true })
+  .not('first_discovered_at', 'is', null).is('first_discovered_by', null)
+checar('nenhuma estreia fantasma ficou para tras', fantasmas === 0,
+  `${fantasmas} copias descobertas por ninguem`)
 
 console.log(`\n${falhas === 0 ? 'TUDO PASSOU' : falhas + ' FALHA(S)'}`)
 process.exit(falhas === 0 ? 0 : 1)

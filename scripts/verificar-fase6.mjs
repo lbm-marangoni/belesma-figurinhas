@@ -141,20 +141,15 @@ await db.exec(`update card_copies set owner_id = '${A}' where id = ${selada.id};
 await db.exec(`update card_copies set owner_id = '${A}' where id in (
   select id from card_copies where card_type_id =
     (select card_type_id from card_copies where id = ${selada.id}) and owner_id is null limit 1);`)
-// A selada passou a ser VENDAVEL com premio: 36 brancos, 12 pretos e 3
-// rosas no mundo, entao raridade vira preco. A prisma segue invendavel.
-const infoSelo = await um(`select cc.seal::text, ct.tier from card_copies cc
-  join card_types ct on ct.id = cc.card_type_id where cc.id = $1`, [selada.id])
-const mult = Number((await um(
-  `select valor from economy_config where chave = 'multiplicador_selo_' || $1`, [infoSelo.seal])).valor)
-const baseSelo = Number((await um(
-  `select valor from economy_config where chave = 'venda_' || $1`, [infoSelo.tier])).valor)
-const vs = (await como(A, `select public.vender($1) as r`, [selada.id])).r
-checar('selada vende com premio do selo',
-  Number(vs.valor) === Math.floor(baseSelo * mult),
-  `${infoSelo.seal} em ${infoSelo.tier}: ${vs.valor} = ${baseSelo} x ${mult}`)
-checar('o selo continua na copia depois da venda',
-  (await um(`select seal::text from card_copies where id=$1`, [selada.id])).seal === infoSelo.seal)
+// A §19.4 vale: selada NAO vende, nem com premio. Chegou a existir um
+// multiplicador por selo aqui - foi retirado. O selo e a coisa mais rara
+// fora da Prisma (36 brancos, 12 pretos, 3 rosas no mundo) e a raridade
+// dele vale no ranking, nao no caixa.
+await deveFalhar('selada nao se vende (§19.4)', A,
+  `select public.vender($1)`, [selada.id])
+checar('a selada continua com o dono e com o selo',
+  (await um(`select owner_id::text, seal::text from card_copies where id=$1`, [selada.id]))
+    .owner_id === A)
 
 const prismas = await tudo(`select cc.id from card_copies cc join card_types ct on ct.id=cc.card_type_id
   where ct.tier='prisma' and cc.owner_id is null limit 2`)

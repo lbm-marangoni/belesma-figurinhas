@@ -188,23 +188,23 @@ function Shell() {
     </nav>
 
     {mais && (
-      <div className="folha-fundo" onClick={() => setMais(false)}>
-        <div className="folha" role="dialog" aria-label="mais opções"
+      <div className="gaveta-fundo" onClick={() => setMais(false)}>
+        <div className="gaveta" role="dialog" aria-label="mais opções"
              onClick={(e) => e.stopPropagation()}>
-          <span className="folha-pega" />
-          <div className="folha-topo">
+          <span className="gaveta-pega" />
+          <div className="gaveta-topo">
             <strong>{jogador.nickname}</strong>
             <span className="chip"><strong>{jogador.baba}</strong> baba</span>
           </div>
-          <div className="folha-grade">
+          <div className="gaveta-grade">
             {secundarias.map(([para, rotulo]) => (
               <NavLink key={para} to={para}
-                className={({ isActive }) => `folha-item ${isActive ? 'folha-item-ativo' : ''}`}>
+                className={({ isActive }) => `gaveta-item ${isActive ? 'gaveta-item-ativo' : ''}`}>
                 {rotulo}
               </NavLink>
             ))}
           </div>
-          <button onClick={sair} className="folha-sair">sair da conta</button>
+          <button onClick={sair} className="gaveta-sair">sair da conta</button>
         </div>
       </div>
     )}

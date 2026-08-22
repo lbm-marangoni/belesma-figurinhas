@@ -43,7 +43,14 @@ for (let i = 0; i < N_JOGADORES; i++) {
   const { data: lista } = await admin.auth.admin.listUsers({ perPage: 200 })
   const velho = lista?.users?.find((u) => u.email === email)
   if (velho) {
-    await admin.rpc('admin_reset_player_collection', { p_nickname: nick }).catch(() => {})
+    // sobra de uma rodada anterior. Desfaz as estreias ANTES de apagar: o FK
+    // e `on delete set null` e a copia ficaria descoberta por ninguem.
+    await admin.from('card_copies')
+      .update({ first_discovered_at: null, first_discovered_by: null })
+      .eq('first_discovered_by', velho.id)
+    // `.catch()` nao existe no builder do postgrest - ele e thenable, nao
+    // Promise. O erro vem no campo .error.
+    await admin.rpc('admin_reset_player_collection', { p_nickname: nick })
     await admin.from('players').delete().eq('id', velho.id)
     await admin.auth.admin.deleteUser(velho.id)
   }
@@ -118,13 +125,46 @@ checar('o acervo cresceu exatamente o que foi entregue',
   `${depois.count - antes.count} vs ${unicas.size}`)
 
 // a auditoria tem que bater com o que foi devolvido
-const { count: auditadas } = await admin.from('pack_opening_cards')
-  .select('id', { count: 'exact', head: true })
+//
+// Contar pack_opening_cards INTEIRA compara este teste com o banco todo: o
+// acervo real do grupo entrava na conta e o numero nunca fechava (352 vs
+// 293, sendo 59 aberturas de verdade). A contagem e das aberturas DESTES
+// jogadores, so.
+const idsAbertura = []
+for (const { id } of clientes) {
+  const { data } = await admin.from('pack_openings').select('id').eq('player_id', id)
+  idsAbertura.push(...(data ?? []).map((a) => a.id))
+}
+let auditadas = 0
+for (let i = 0; i < idsAbertura.length; i += 500) {
+  const { count } = await admin.from('pack_opening_cards')
+    .select('id', { count: 'exact', head: true })
+    .in('opening_id', idsAbertura.slice(i, i + 500))
+  auditadas += count ?? 0
+}
 checar('auditoria registrou toda carta entregue',
   auditadas === todasCopias.length, `${auditadas} vs ${todasCopias.length}`)
 
 // ---------------------------------------------------------------- limpeza
 console.log('\nlimpando...')
+
+// ESTREIAS. Isto precisa vir ANTES de apagar os jogadores.
+//
+// open_pack grava first_discovered_at/by na copia. O FK de
+// first_discovered_by e `on delete set null`, entao apagar o jogador de
+// teste deixava a copia marcada como DESCOBERTA sem descobridor: uma
+// estreia fantasma, que rouba do grupo a chance de fazer a primeira.
+// Foi assim que 26 tipos apareceram descobertos por ninguem.
+//
+// So limpa o que ESTES jogadores descobriram agora.
+for (const { id } of clientes) {
+  const { data, error } = await admin.from('card_copies')
+    .update({ first_discovered_at: null, first_discovered_by: null })
+    .eq('first_discovered_by', id)
+    .select('id')
+  if (error) console.log('  ! falhou limpar estreias:', error.message)
+  else if (data?.length) console.log(`  estreias de teste desfeitas: ${data.length}`)
+}
 await admin.from('players').update({ is_admin: true }).eq('id', chefe.id)
 for (const { nick } of clientes) {
   await chefe.c.rpc('admin_reset_player_collection', { p_nickname: nick })
@@ -153,6 +193,13 @@ for (const { id } of clientes) {
 const sobrou = await admin.from('card_copies').select('id', { count: 'exact', head: true }).not('owner_id', 'is', null)
 checar('o acervo dos jogadores REAIS ficou intacto', sobrou.count === antes.count,
   `${antes.count} antes, ${sobrou.count} depois`)
+
+// nenhuma copia pode terminar marcada como descoberta sem descobridor
+const fantasmas = await admin.from('card_copies')
+  .select('id', { count: 'exact', head: true })
+  .not('first_discovered_at', 'is', null).is('first_discovered_by', null)
+checar('nenhuma estreia fantasma ficou para tras', fantasmas.count === 0,
+  `${fantasmas.count} copias descobertas por ninguem`)
 
 console.log(`\n${falhas === 0 ? 'TUDO PASSOU' : falhas + ' FALHA(S)'}`)
 process.exit(falhas === 0 ? 0 : 1)

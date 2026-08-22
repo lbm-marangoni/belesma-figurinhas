@@ -3659,8 +3659,12 @@ begin
 end $$;
 
 
--- ===== 20260822200000_ranking_e_selo.sql =====
--- BELESMA figurinhas - criterios do ranking e o selo entrando no preco
+-- ===== 20260822200000_ranking_criterios.sql =====
+-- BELESMA figurinhas - criterios do ranking da cacada de serial
+--
+-- Chegou a existir aqui um multiplicador de venda por selo. Foi retirado: a
+-- §19.4 diz "nunca vende copia selada" e continua valendo. O selo pontua no
+-- ranking, que e onde ele deve valer - nao no caixa.
 
 -- ================================================================ pontuacao
 -- "A carta mais rara possivel" precisa de um criterio unico, senao cada
@@ -3758,97 +3762,8 @@ as $$
   from agregado a join public.players p on p.id = a.owner_id;
 $$;
 
--- ================================================================ selo no preco
--- A spec §19.4 diz "nunca vende copia selada". A intencao era proteger o
--- trofeu de uma venda por engano - o selo e a coisa mais rara que existe
--- fora das Prismas: 36 brancos, 12 pretos e 3 rosas no mundo inteiro.
---
--- Passa a ser vendavel, com premio e com aviso reforcado na interface. O que
--- NAO muda: a contagem de selos do mundo continua 36/12/3, porque o selo
--- viaja com a copia de volta para o pool. A prisma segue invendavel.
-insert into public.economy_config (chave, valor, descricao) values
-  ('multiplicador_selo_branco',  2, 'Premio de venda para copia com selo branco'),
-  ('multiplicador_selo_preto',   4, 'Premio de venda para copia com selo preto'),
-  ('multiplicador_selo_rosa',   10, 'Premio de venda para copia com selo rosa')
-on conflict (chave) do nothing;
-
-create or replace function public.vender(p_copy_id bigint)
-returns jsonb
-language plpgsql volatile security definer
-set search_path = public, extensions, pg_temp
-as $$
-declare
-  v_uid   uuid := auth.uid();
-  c       record;
-  v_valor numeric;
-  v_saldo int;
-begin
-  if v_uid is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
-
-  select cc.id, cc.card_type_id, cc.seal, cc.origin, cc.damage_level, cc.owner_id,
-         ct.tier, t.vendavel
-    into c
-  from public.card_copies cc
-  join public.card_types ct on ct.id = cc.card_type_id
-  join public.tiers t on t.slug = ct.tier
-  where cc.id = p_copy_id and not cc.burned
-  for update of cc;
-
-  if c.id is null or c.owner_id <> v_uid then raise exception 'essa copia nao e sua'; end if;
-  if not c.vendavel then raise exception 'figurinha % nao pode ser vendida', c.tier; end if;
-
-  if (select count(*) from public.card_copies
-      where owner_id = v_uid and card_type_id = c.card_type_id and not burned) < 2 then
-    raise exception 'essa e a sua ultima copia desse tipo';
-  end if;
-
-  if exists (select 1 from public.trades where status = 'pending'
-             and (offered_copy_id = p_copy_id or requested_copy_id = p_copy_id)) then
-    raise exception 'essa copia esta em proposta de troca aberta';
-  end if;
-
-  v_valor := private.preco('venda_' || c.tier);
-  if v_valor is null then raise exception 'sem preco para o tier %', c.tier; end if;
-
-  -- o selo entra ANTES dos redutores: mais raro, mais caro
-  if c.seal <> 'none' then
-    v_valor := v_valor * coalesce(private.preco('multiplicador_selo_' || c.seal::text), 1);
-  end if;
-  if c.damage_level > 0 then v_valor := v_valor * private.preco('multiplicador_estragada'); end if;
-  if c.origin = 'forge'  then v_valor := v_valor * private.preco('multiplicador_forjada'); end if;
-  v_valor := floor(v_valor);
-
-  insert into public.copy_history (copy_id, from_player, to_player, kind)
-  values (p_copy_id, v_uid, null, 'sell');
-
-  if c.origin = 'forge' then
-    update public.card_copies
-    set owner_id = null, claimed_at = null, burned = true
-    where id = p_copy_id;
-  else
-    update public.card_copies
-    set owner_id = null, claimed_at = null,
-        damage_level = least(damage_level + 1, 3)
-    where id = p_copy_id;
-  end if;
-
-  delete from public.album_colagem where copy_id = p_copy_id;
-  update public.players set
-    showcase_1 = case when showcase_1 = p_copy_id then null else showcase_1 end,
-    showcase_2 = case when showcase_2 = p_copy_id then null else showcase_2 end,
-    showcase_3 = case when showcase_3 = p_copy_id then null else showcase_3 end
-  where id = v_uid;
-
-  v_saldo := private.mover_baba(v_uid, v_valor::int, 'venda', p_copy_id::text);
-  return jsonb_build_object('valor', v_valor, 'saldo', v_saldo,
-                            'queimada', c.origin = 'forge', 'selo', c.seal);
-end;
-$$;
-
 alter function public.ranking_serial() owner to postgres;
-alter function public.vender(bigint)   owner to postgres;
 grant execute on function public.ranking_serial() to anon, authenticated;
-grant execute on function public.vender(bigint)   to authenticated;
 
 
 -- ===== 20260822210000_cascata_respeita_garantia.sql =====

@@ -82,39 +82,47 @@
   padding: 0 .24rem;
 }
 
-/* ---------------------------------------------------------------- folha */
-.folha-fundo {
+/* ================================================================ gaveta
+ * "gaveta", nao "folha": o album.css ja usa .folha para a folha que gira na
+ * lombada. Com o mesmo nome, a gaveta do celular herdava `width:100%`, o
+ * gradiente e a `animation: sobe` da gaveta — a folha do album virava uma
+ * laje cinza que nunca girava — e no celular herdava o `display:none` que o
+ * album.css poe na folha, entao o botao "Mais" nao abria nada.
+ *
+ * CSS de componente e global. Nome generico em arquivo separado nao isola
+ * nada. */
+.gaveta-fundo {
   position: fixed;
   inset: 0;
   z-index: 70;
   display: flex;
   align-items: flex-end;
   background: rgba(0, 0, 0, .62);
-  animation: folha-escurece 180ms ease;
+  animation: gaveta-escurece 180ms ease;
 }
-@keyframes folha-escurece { from { opacity: 0; } to { opacity: 1; } }
+@keyframes gaveta-escurece { from { opacity: 0; } to { opacity: 1; } }
 
-.folha {
+.gaveta {
   width: 100%;
   border-radius: 16px 16px 0 0;
   border-top: 1px solid var(--borda-viva);
   background: linear-gradient(#17171a, #0e0e10);
   padding: .5rem 1rem calc(1rem + env(safe-area-inset-bottom));
-  animation: folha-sobe 220ms cubic-bezier(.2, .9, .3, 1.05);
+  animation: gaveta-sobe 220ms cubic-bezier(.2, .9, .3, 1.05);
 }
-@keyframes folha-sobe {
+@keyframes gaveta-sobe {
   from { transform: translateY(100%); }
   to   { transform: translateY(0); }
 }
 
-.folha-pega {
+.gaveta-pega {
   display: block;
   width: 2.4rem; height: 4px;
   margin: .1rem auto .7rem;
   border-radius: 99px;
   background: #3a3a42;
 }
-.folha-topo {
+.gaveta-topo {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -123,13 +131,13 @@
   border-bottom: 1px solid #232326;
 }
 
-.folha-grade {
+.gaveta-grade {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: .4rem;
   padding: .7rem 0;
 }
-.folha-item {
+.gaveta-item {
   display: flex;
   align-items: center;
   min-height: 2.9rem;
@@ -141,18 +149,18 @@
   font-weight: 500;
   color: var(--texto-fraco);
 }
-.folha-item:active     { background: #ffffff10; }
-.folha-item-ativo      { color: var(--texto); border-color: var(--acento); }
+.gaveta-item:active     { background: #ffffff10; }
+.gaveta-item-ativo      { color: var(--texto); border-color: var(--acento); }
 
-.folha-sair {
+.gaveta-sair {
   width: 100%;
   min-height: 2.7rem;
   border-radius: 10px;
   color: var(--texto-tenue);
   font-size: .85rem;
 }
-.folha-sair:active { background: #ffffff0d; }
+.gaveta-sair:active { background: #ffffff0d; }
 
 @media (prefers-reduced-motion: reduce) {
-  .folha, .folha-fundo { animation: none; }
+  .gaveta, .gaveta-fundo { animation: none; }
 }
