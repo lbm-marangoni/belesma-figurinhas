@@ -23,11 +23,15 @@ scripts/
   check-assets.mjs            confere as artes contra o catálogo (spec §3)
 ```
 
-## Rodar a verificação
+## Rodar as verificações
 
 ```
-npm run verificar:fase1
+npm run verificar:fase1     # Postgres local (PGlite), sem Docker
+node scripts/fraude-http.mjs  # contra o Supabase de verdade, por HTTP
 ```
+
+O segundo precisa de `SUPABASE_SERVICE_ROLE_KEY` no ambiente — só para criar
+o jogador cobaia. As tentativas de fraude usam exclusivamente a anon key.
 
 Sobe um Postgres em WASM, aplica **as mesmas migrações** que vão para o
 Supabase e testa. Não precisa de Docker nem de projeto no ar.
@@ -36,16 +40,27 @@ O que ele não cobre: a camada HTTP do PostgREST e o JWT do Supabase Auth.
 `auth.uid()` é um stub que lê a mesma GUC que o Supabase usa, então as
 policies são exercitadas de verdade, mas o transporte não.
 
-## Aplicar no Supabase
+## No ar
 
-Ainda **não foi aplicado em nenhum projeto Supabase.** Quando for:
+| | |
+|---|---|
+| Site | https://lbm-marangoni.github.io/belesma-figurinhas/ |
+| Supabase | `jllecfwnwgabyqhhfanx` (projeto novo; o `cepdbxgealjdiqmacnvm` do jogo antigo ficou intocado) |
+| Repo | https://github.com/lbm-marangoni/belesma-figurinhas (público — Pages não roda em repo privado no plano free) |
+
+Push na `main` roda `check-assets`, `verificar:fase1` e o build antes de publicar.
+
+## Reaplicar no Supabase
 
 ```
-supabase link --project-ref <ref>
+supabase link --project-ref jllecfwnwgabyqhhfanx
 npm run db:push
 ```
 
-Depois, para ligar o primeiro admin — na mão, pelo SQL editor do painel, que é
+As migrações são idempotentes: reaplicar não duplica cópia, não re-sorteia
+selo e não infla a reserva.
+
+Para ligar o primeiro admin — na mão, pelo SQL editor do painel, que é
 o único caminho previsto pela spec §18:
 
 ```sql
