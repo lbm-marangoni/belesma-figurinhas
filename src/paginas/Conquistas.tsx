@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Figurinha } from '../componentes/Figurinha'
 import { ROTULO_TIER, COR_TIER, type Carta, type Tier } from '../lib/tipos'
+import '../styles/menu.css'
 
 /**
  * Conquistas (spec §11): índice global, par de Aura, caçada de serial e as
@@ -104,7 +105,7 @@ export default function Conquistas() {
   if (!indice) return <p className="p-6 text-neutral-500">carregando…</p>
 
   return (
-    <div className="space-y-8 p-4 sm:p-6">
+    <div className="mx-auto max-w-5xl space-y-8 p-4 sm:p-6">
       {/* ------------------------------------------------------ índice global */}
       <section>
         <h2 className="text-lg font-semibold tracking-tight">
@@ -125,7 +126,15 @@ export default function Conquistas() {
                 <span className={p.descoberto ? 'font-medium' : 'text-neutral-600'}>
                   {p.descoberto ? p.nome : '???'}
                 </span>
-                <span className="text-neutral-500">{achados}/{p.tipos.length} skins</span>
+                <span className="flex items-center gap-2 text-neutral-500">
+                  {achados}/{p.tipos.length} skins
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    strokeWidth="2.5" strokeLinecap="round"
+                    style={{ transform: aberto === p.slug ? 'rotate(180deg)' : 'none',
+                             transition: 'transform 200ms ease' }}>
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </span>
               </button>
 
               {/* a fileira de figurinhas do personagem, sempre visível */}
@@ -138,40 +147,44 @@ export default function Conquistas() {
                 ))}
               </div>
 
-              {aberto === p.slug && (
-                <table className="w-full border-t border-neutral-800 text-left text-xs">
-                  <thead className="text-neutral-600">
-                    <tr>
-                      <th className="py-1 pl-3 font-normal">skin</th>
-                      <th className="font-normal">tier</th>
-                      <th className="text-right font-normal">saíram</th>
-                      <th className="pr-3 text-right font-normal">estreia</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {p.tipos.map((t) => (
-                      <tr key={t.skin} className="border-t border-neutral-900">
-                        <td className="py-1 pl-3">
-                          {t.descoberto
-                            ? t.skin
-                            : <span className="text-neutral-700">? ? ?</span>}
-                        </td>
-                        <td style={{ color: t.descoberto ? COR_TIER[t.tier] : '#404040' }}>
+              {/* abre com transicao de altura, nao com corte seco */}
+              <div className={`indice-corpo ${aberto === p.slug ? 'aberto' : ''}`}>
+                <div>
+                  <div className="indice-linha indice-cabec">
+                    <span>skin</span><span>tier</span><span>distribuídas</span>
+                    <span className="text-right">estreia mundial</span>
+                  </div>
+                  {p.tipos.map((t) => {
+                    const pct = t.print_run > 0 ? (t.distribuidas / t.print_run) * 100 : 0
+                    return (
+                      <div key={t.skin}
+                        className={`indice-linha ${t.descoberto ? '' : 'indice-oculta'}`}>
+                        <span className="truncate">{t.descoberto ? t.skin : '???'}</span>
+                        <span className="pilula"
+                          style={{ color: t.descoberto ? COR_TIER[t.tier] : '#4a4a50' }}>
                           {ROTULO_TIER[t.tier]}
-                        </td>
-                        <td className="text-right tabular-nums text-neutral-400">
-                          {t.distribuidas} de {t.print_run}
-                        </td>
-                        <td className="pr-3 text-right text-neutral-500">
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <span className="tabular-nums text-neutral-400">
+                            {t.distribuidas}/{t.print_run}
+                          </span>
+                          <span className="barra flex-1">
+                            <i style={{
+                              width: `${Math.max(pct, t.distribuidas > 0 ? 4 : 0)}%`,
+                              background: t.descoberto ? COR_TIER[t.tier] : '#3a3a41',
+                            }} />
+                          </span>
+                        </span>
+                        <span className="truncate text-right text-neutral-500">
                           {t.primeiro
                             ? <>{t.primeiro} · {new Date(t.em!).toLocaleDateString('pt-BR')}</>
                             : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
           )
         })}

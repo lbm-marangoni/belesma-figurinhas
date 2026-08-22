@@ -1,0 +1,173 @@
+/* Popover do leque de seriais e expansão do índice global.
+ *
+ * Dois problemas que isto conserta:
+ *  - o leque abria seco e EMPURRAVA o grid, fazendo tudo pular. Agora ele
+ *    flutua ancorado na carta e entra com escala + deslize.
+ *  - as ações eram "↓" e "$" soltos, sem rótulo. Agora têm ícone, rótulo e
+ *    área de clique de verdade.
+ */
+
+/* ================================================================ popover */
+/* Posicao FIXA, com as coordenadas calculadas no clique e travadas dentro da
+   janela. Absoluto dentro da celula estourava para fora da tela na primeira
+   e na ultima coluna do grid. */
+.leque {
+  position: fixed;
+  translate: -50% 0;
+  z-index: 60;
+  min-width: 15rem;
+  max-width: 18rem;
+  border: 1px solid var(--borda-viva);
+  border-radius: 12px;
+  background: linear-gradient(#17171a, #0e0e10);
+  box-shadow:
+    0 0 0 1px #00000080,
+    0 18px 40px -8px rgba(0, 0, 0, .85);
+  transform-origin: top center;
+  animation: leque-entra 170ms cubic-bezier(.2, .9, .3, 1.1);
+  overflow: hidden;
+}
+@keyframes leque-entra {
+  from { opacity: 0; transform: translateY(-8px) scale(.94); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
+/* a setinha apontando para a carta; segue o desvio quando o menu e travado
+   na borda da janela */
+.leque::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: var(--seta, 50%);
+  translate: -50% 0;
+  width: 9px; height: 9px;
+  rotate: 45deg;
+  background: #17171a;
+  border-left: 1px solid var(--borda-viva);
+  border-top: 1px solid var(--borda-viva);
+}
+
+.leque-topo {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .5rem;
+  padding: .5rem .7rem .4rem;
+  border-bottom: 1px solid #232326;
+}
+.leque-topo b { font-size: .8rem; font-weight: 600; }
+.leque-topo span { font-size: .65rem; color: var(--texto-tenue); }
+
+.leque-lista { max-height: 15rem; overflow-y: auto; padding: .25rem; }
+
+.leque-linha {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  border-radius: 8px;
+  padding: .25rem .35rem;
+  transition: background 120ms ease;
+}
+.leque-linha:hover { background: #ffffff09; }
+.leque-linha + .leque-linha { margin-top: 1px; }
+
+.leque-serial {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  font: 600 .78rem ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+.leque-serial:hover { color: #fff; }
+
+/* etiqueta miúda de selo / desgaste / forjada */
+.tag {
+  border-radius: 4px;
+  padding: 0 .25rem;
+  font: 700 .55rem/1.15rem ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.tag-selo     { background: #e8e2c8; color: #17150f; }
+.tag-desgaste { background: #6b4a12; color: #ffd591; }
+.tag-forjada  { background: #d1a054; color: #100d08; }
+.tag-melhor   { background: #ffffff18; color: var(--texto-fraco); }
+
+.leque-acao {
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 6px;
+  color: var(--texto-tenue);
+  transition: background 120ms ease, color 120ms ease;
+}
+.leque-acao:hover:not(:disabled) { background: #ffffff14; color: var(--texto); }
+.leque-acao:disabled { opacity: .3; }
+.leque-acao.vender:hover:not(:disabled) { color: var(--acento); }
+.leque-acao.restaurar:hover:not(:disabled) { color: #ffc46b; }
+
+.leque-rodape {
+  border-top: 1px solid #232326;
+  padding: .35rem .7rem;
+  font-size: .62rem;
+  color: var(--texto-tenue);
+}
+
+/* ================================================================ índice */
+/* A tabela sprawlava na largura inteira e abria sem transição. */
+.indice-corpo {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 260ms cubic-bezier(.3, .8, .3, 1);
+}
+.indice-corpo.aberto { grid-template-rows: 1fr; }
+.indice-corpo > div { overflow: hidden; }
+
+.indice-linha {
+  display: grid;
+  grid-template-columns: minmax(6rem, 1.4fr) 5.5rem minmax(5rem, .9fr) minmax(7rem, 1.1fr);
+  align-items: center;
+  gap: .5rem;
+  padding: .28rem .7rem;
+  font-size: .78rem;
+  border-top: 1px solid #131315;
+}
+.indice-linha:hover { background: #ffffff06; }
+.indice-cabec {
+  font-size: .62rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--texto-tenue);
+  border-top: 1px solid var(--borda);
+  padding-top: .35rem;
+  padding-bottom: .35rem;
+}
+.indice-oculta { color: #4a4a50; }
+
+.pilula {
+  justify-self: start;
+  border-radius: 999px;
+  padding: .05rem .45rem;
+  font-size: .62rem;
+  font-weight: 700;
+  letter-spacing: .03em;
+  border: 1px solid currentColor;
+}
+
+.barra {
+  position: relative;
+  height: 4px;
+  border-radius: 99px;
+  background: #232326;
+  overflow: hidden;
+}
+.barra > i { position: absolute; inset: 0 auto 0 0; border-radius: 99px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .leque { animation: none; }
+  .indice-corpo { transition: none; }
+}

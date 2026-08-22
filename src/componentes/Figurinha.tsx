@@ -47,7 +47,7 @@ export function Figurinha({
   tamanho?: 'miniatura' | 'media' | 'grande'
   interativa?: boolean
   shader?: boolean
-  onClick?: () => void
+  onClick?: (e: React.MouseEvent<HTMLDivElement>) => void
   selecionada?: boolean
 }) {
   const [semArte, setSemArte] = useState(false)

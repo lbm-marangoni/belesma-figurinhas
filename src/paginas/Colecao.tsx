@@ -4,6 +4,8 @@ import { useSessao } from '../lib/sessao'
 import { Figurinha } from '../componentes/Figurinha'
 import { CartaAberta } from '../componentes/CartaAberta'
 import { baixarFigurinha } from '../lib/exportar'
+import { ROTULO_TIER as RT, COR_TIER } from '../lib/tipos'
+import '../styles/menu.css'
 import { ROTULO_TIER, TIERS, type Carta, type Selo, type Tier } from '../lib/tipos'
 
 type Ordem = 'raridade' | 'raridade-asc' | 'personagem' | 'skin'
@@ -29,6 +31,7 @@ export default function Colecao() {
   const [selo, setSelo] = useState<'todos' | Exclude<Selo, 'none'> | 'nenhum'>('todos')
   const [ordem, setOrdem] = useState<Ordem>('raridade')
   const [aberta, setAberta] = useState<string | null>(null)
+  const [posLeque, setPosLeque] = useState({ x: 0, y: 0, seta: 50 })
   const [emFoco, setEmFoco] = useState<number | null>(null)
 
   const recarregarAcervo = useCallback(async () => {
@@ -56,6 +59,36 @@ export default function Colecao() {
   }, [jogador])
 
   useEffect(() => { recarregarAcervo() }, [recarregarAcervo])
+
+  // Esc e clique fora fecham o leque. Sem isso ele ficava aberto para sempre
+  // e o jogador tinha que clicar de novo exatamente na carta.
+  useEffect(() => {
+    if (!aberta) return
+    const fora = (e: MouseEvent) => {
+      if (!(e.target as Element).closest('[data-leque]')) setAberta(null)
+    }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setAberta(null) }
+    const rolou = () => setAberta(null)   // menu fixo nao acompanha a rolagem
+    document.addEventListener('mousedown', fora)
+    window.addEventListener('keydown', esc)
+    window.addEventListener('scroll', rolou, true)
+    return () => {
+      document.removeEventListener('mousedown', fora)
+      window.removeEventListener('keydown', esc)
+      window.removeEventListener('scroll', rolou, true)
+    }
+  }, [aberta])
+
+  /** Abre o leque ancorado na carta, travado dentro da janela. */
+  function abrirLeque(chave: string, alvo: HTMLElement) {
+    if (aberta === chave) return setAberta(null)
+    const r = alvo.getBoundingClientRect()
+    const largura = 288                       // igual ao max-width do .leque
+    const centro = r.left + r.width / 2
+    const x = Math.min(Math.max(centro, largura / 2 + 10), window.innerWidth - largura / 2 - 10)
+    setPosLeque({ x, y: r.bottom + 8, seta: 50 + ((centro - x) / largura) * 100 })
+    setAberta(chave)
+  }
 
   // Vender e IRREVERSIVEL: a copia volta ao pool marcada com desgaste e outra
   // pessoa pode puxa-la (spec §19.4). Por isso a confirmacao explicita.
@@ -169,44 +202,77 @@ export default function Colecao() {
               <Figurinha
                 carta={copias[0]}
                 tamanho="miniatura"
-                onClick={() => copias.length === 1
+                onClick={(e: any) => copias.length === 1
                   ? setEmFoco(planas.indexOf(copias[0]))
-                  : setAberta(aberta === chave ? null : chave)}
+                  : abrirLeque(chave, e.currentTarget as HTMLElement)}
               />
               {copias.length > 1 && (
                 <span className="selo-novo absolute -right-1.5 -top-1.5">x{copias.length}</span>
               )}
 
-              {/* leque com todos os seriais */}
+              {/* leque com todos os seriais — flutua, não empurra o grid */}
               {aberta === chave && (
-                <ul className="mt-1 rounded border border-neutral-700 bg-neutral-900 p-1.5 text-[11px]">
-                  {copias.map((c) => (
-                    <li key={c.copy_id} className="flex items-center gap-1 py-0.5">
-                      <button onClick={() => setEmFoco(planas.indexOf(c))}
-                        className="flex flex-1 justify-between gap-2 font-mono tabular-nums hover:text-white">
-                        <span className="text-neutral-300">
-                          {c.origin === 'forge'
-                            ? `FORJADA ${c.forge_index}`
-                            : `${c.serial_number}/${c.print_run}`}
-                        </span>
-                        {c.seal !== 'none' && <span className="text-neutral-500">selo {c.seal}</span>}
-                      </button>
-                      <button title="baixar para o WhatsApp" disabled={ocupado}
-                        onClick={() => baixarFigurinha(c, jogador!.nickname)}
-                        className="px-1 text-neutral-500 hover:text-neutral-200">↓</button>
-                      {c.damage_level > 0 && (
-                        <button title="restaurar" disabled={ocupado}
-                          onClick={() => restaurar(c)}
-                          className="px-1 text-amber-500 hover:text-amber-300">✦</button>
-                      )}
-                      {copias.length > 1 && c.seal === 'none' && c.tier !== 'prisma' && (
-                        <button title="vender" disabled={ocupado}
-                          onClick={() => vender(c)}
-                          className="px-1 text-neutral-500 hover:text-[var(--acento)]">$</button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+                <div className="leque" data-leque
+                  style={{
+                    left: posLeque.x, top: posLeque.y,
+                    ['--seta' as string]: `${posLeque.seta}%`,
+                  }}>
+                  <div className="leque-topo">
+                    <b style={{ color: COR_TIER[copias[0].tier] }}>{copias[0].skin}</b>
+                    <span>{RT[copias[0].tier]} · {copias.length} sua(s)</span>
+                  </div>
+
+                  <div className="leque-lista">
+                    {copias.map((c, i) => (
+                      <div key={c.copy_id} className="leque-linha">
+                        <button onClick={() => { setEmFoco(planas.indexOf(c)); setAberta(null) }}
+                          className="leque-serial" title="abrir em tela cheia">
+                          <span style={{ color: COR_TIER[c.tier] }}>
+                            {c.origin === 'forge'
+                              ? `FORJADA ${String(c.forge_index).padStart(2, '0')}`
+                              : `${String(c.serial_number).padStart(String(c.print_run).length, '0')}/${c.print_run}`}
+                          </span>
+                          {i === 0 && copias.length > 1 && <span className="tag tag-melhor">melhor</span>}
+                          {c.seal !== 'none' && <span className="tag tag-selo">{c.seal}</span>}
+                          {c.origin === 'forge' && <span className="tag tag-forjada">forjada</span>}
+                          {c.damage_level > 0 && <span className="tag tag-desgaste">nv {c.damage_level}</span>}
+                        </button>
+
+                        <button className="leque-acao" title="baixar para o WhatsApp"
+                          disabled={ocupado} onClick={() => baixarFigurinha(c, jogador!.nickname)}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                               stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                            <path d="M12 4v11m0 0 4-4m-4 4-4-4M4 19h16" />
+                          </svg>
+                        </button>
+
+                        {c.damage_level > 0 && (
+                          <button className="leque-acao restaurar" title="restaurar o desgaste"
+                            disabled={ocupado} onClick={() => restaurar(c)}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                                 stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                              <path d="M12 3v3m0 12v3m9-9h-3M6 12H3m13.5-6.5-2 2m-5 5-2 2m0-9 2 2m5 5 2 2" />
+                            </svg>
+                          </button>
+                        )}
+
+                        {copias.length > 1 && c.seal === 'none' && c.tier !== 'prisma' && (
+                          <button className="leque-acao vender" title="vender ao pool"
+                            disabled={ocupado} onClick={() => vender(c)}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                                 stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                              <path d="M12 2v20M17 6.5C17 4.6 14.8 3.5 12 3.5S7 4.6 7 6.5s2 2.7 5 3.5 5 1.6 5 3.5-2.2 3-5 3-5-1.1-5-3" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {copias.length === 1 && (
+                    <p className="leque-rodape">Sua única cópia deste tipo — não dá para vender.</p>
+                  )}
+                </div>
               )}
             </div>
           ))}
