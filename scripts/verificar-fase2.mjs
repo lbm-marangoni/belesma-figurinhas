@@ -113,9 +113,8 @@ let quentes = 0, bonus = 0, promovidos = 0, cartas = 0
 // A spec §8 permite repetir card_type SO quando o tier nao tem tipos
 // distintos suficientes para os slots sorteados dele. Ex.: pacote quente
 // sorteia 4 slots de mitica, e mitica tem 3 tipos (um por personagem).
-const tiposPorTier = Object.fromEntries((await tudo(
-  `select tier, count(*) as n from card_types group by tier`)).map((r) => [r.tier, Number(r.n)]))
 let repetidoIlegal = 0, repetidoLegitimo = 0
+const repeticoes = []
 let raroAbaixo = 0, ultraAbaixo = 0, duroEmGarantido = 0
 
 const ordem = Object.fromEntries((await tudo(`select slug, tier_order from tiers`))
@@ -131,11 +130,9 @@ for (const [tipo, n] of [['comum', 300], ['raro', 100], ['ultra', 50]]) {
     promovidos += r.promovidos
     const chaves = r.cartas.map((c) => c.skin + '|' + c.character_slug)
     if (new Set(chaves).size !== chaves.length) {
-      // quantos slots sairam de cada tier neste pacote
       const porTier = {}
       for (const c of r.cartas) porTier[c.tier] = (porTier[c.tier] ?? 0) + 1
-      const forcado = Object.entries(porTier).some(([t, n]) => n > tiposPorTier[t])
-      if (forcado) repetidoLegitimo++; else repetidoIlegal++
+      repeticoes.push(porTier)
     }
 
     const hit = r.cartas.filter((c) => c.from_hit_table)
@@ -156,8 +153,26 @@ for (const [tipo, n] of [['comum', 300], ['raro', 100], ['ultra', 50]]) {
   }
 }
 
+// A spec §8 permite repetir card_type SO quando o tier nao tem tipos
+// distintos suficientes para os slots sorteados dele.
+//
+// "Suficientes" e por tipos COM ESTOQUE, nao por tipos que existem: se uma
+// skin de mitica esgotou, sobram 2 tipos para 3 slots e a repeticao vira
+// forcada. Comparar com o total de tipos dava falso positivo raro - foi o que
+// fez este teste piscar em 1 de cada 20 execucoes.
+const comEstoque = Object.fromEntries((await tudo(`
+  select ct.tier, count(distinct ct.id) as n
+  from card_types ct join card_copies cc on cc.card_type_id = ct.id
+  where cc.owner_id is null and not cc.burned
+  group by ct.tier`)).map((r) => [r.tier, Number(r.n)]))
+
+for (const porTier of repeticoes) {
+  const forcado = Object.entries(porTier).some(([t, n]) => n > (comEstoque[t] ?? 0))
+  if (forcado) repetidoLegitimo++; else repetidoIlegal++
+}
 checar('repeticao de card_type so quando o tier esgota os tipos',
-  repetidoIlegal === 0, `${repetidoIlegal} ilegais, ${repetidoLegitimo} forcados pelo tamanho do tier`)
+  repetidoIlegal === 0,
+  `${repetidoIlegal} ilegais, ${repetidoLegitimo} forcados por falta de tipo com estoque`)
 checar('Raro sempre epica ou melhor', raroAbaixo === 0, `${raroAbaixo} abaixo`)
 checar('Ultra sempre mitica ou melhor', ultraAbaixo === 0, `${ultraAbaixo} abaixo`)
 checar('diamante/prisma nunca em slot garantido', duroEmGarantido === 0, `${duroEmGarantido}`)
@@ -168,10 +183,18 @@ console.log(`    quente ${quentes} (${pct(quentes)}, esperado 1,5%)`)
 console.log(`    bonus  ${bonus} (${pct(bonus)}, esperado 8%)`)
 console.log(`    promocoes ${promovidos} em ${totalPacotes * 3} slots base ` +
             `(${(100 * promovidos / (totalPacotes * 3)).toFixed(1)}%, esperado 4%)`)
-checar('taxa de pacote quente plausivel', quentes / totalPacotes < 0.06, pct(quentes))
-checar('taxa de bonus plausivel', Math.abs(bonus / totalPacotes - 0.08) < 0.05, pct(bonus))
+// Tolerancias em ~4 sigma da binomial, nao chutadas: com 451 pacotes o
+// bonus tem media 36 e desvio 5,8, entao +-5 pontos percentuais era 4 sigma
+// justo e o teste piscava em CI. Porta de CI nao pode falhar por sorte.
+const sigma = (n, p) => Math.sqrt(n * p * (1 - p)) / n
+const dentro = (obs, n, p, k = 4) => Math.abs(obs / n - p) <= k * sigma(n, p)
+
+checar('taxa de pacote quente plausivel',
+  dentro(quentes, totalPacotes, 0.015), pct(quentes))
+checar('taxa de bonus plausivel',
+  dentro(bonus, totalPacotes, 0.08), pct(bonus))
 checar('taxa de promocao plausivel',
-  Math.abs(promovidos / (totalPacotes * 3) - 0.04) < 0.03,
+  dentro(promovidos, totalPacotes * 3, 0.04),
   (100 * promovidos / (totalPacotes * 3)).toFixed(1) + '%')
 
 console.log('\n    slot de hit do pacote Comum (limpo):')
@@ -275,7 +298,7 @@ const tinhaAna = Number((await um(`select count(*) as n from card_copies where o
 // uma forjada para conferir que ela e queimada, nao devolvida
 await db.exec(`
   insert into card_copies (card_type_id, serial_number, origin, forge_index, owner_id, verify_code)
-  values ((select id from card_types limit 1), 99001, 'forge', 1, '${UID.ana}', 'FORJADA001');`)
+  values ((select id from card_types limit 1), null, 'forge', 1, '${UID.ana}', 'FORJADA001');`)
 
 const devolvidas = (await como(UID.chefe, `select public.admin_reset_player_collection('ana') as n`)).n
 checar('reset devolveu as puxadas', Number(devolvidas) === tinhaAna, `${devolvidas} de ${tinhaAna}`)

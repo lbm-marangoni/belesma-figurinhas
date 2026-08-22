@@ -197,7 +197,7 @@ checar('descobertos <= total', gi.descobertos <= gi.total_personagens, `${gi.des
 await db.exec(`
   insert into card_copies (card_type_id, serial_number, origin, forge_index, owner_id, verify_code,
                            first_discovered_at, first_discovered_by)
-  select ct.id, 90001, 'forge', 1, '${A}', 'FORJTESTE1', now(), '${A}'
+  select ct.id, null, 'forge', 1, '${A}', 'FORJTESTE1', now(), '${A}'
   from card_types ct join characters ch on ch.id = ct.character_id
   where ch.slug = 'santao' and ct.skin = 'prisma';`)
 const gi2 = (await um(`select public.global_index() as g`)).g

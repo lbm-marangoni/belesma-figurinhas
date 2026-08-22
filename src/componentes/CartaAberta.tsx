@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Figurinha, serialDe } from './Figurinha'
 import { giroscopioPrecisaDePermissao, pedirGiroscopio } from '../lib/tilt'
+import { baixarFigurinha } from '../lib/exportar'
+import { useSessao } from '../lib/sessao'
 import { COR_TIER, ROTULO_TIER, type Carta } from '../lib/tipos'
 
 type Dono = { kind: string; created_at: string; de: string | null; para: string | null }
@@ -27,6 +29,7 @@ export function CartaAberta({
   const carta = lista[indice]
   const [historico, setHistorico] = useState<Dono[] | null>(null)
   const [giroLiberado, setGiroLiberado] = useState(!giroscopioPrecisaDePermissao())
+  const { jogador } = useSessao()
   const dialogo = useRef<HTMLDivElement>(null)
   const focoAnterior = useRef<HTMLElement | null>(null)
   const toqueX = useRef<number | null>(null)
@@ -122,6 +125,18 @@ export function CartaAberta({
               →
             </button>
           </div>
+
+          {/* Export para WhatsApp (spec §14) */}
+          <button
+            onClick={() => jogador && baixarFigurinha(carta, jogador.nickname)}
+            className="btn btn-fraco mt-2 w-full"
+          >
+            baixar figurinha
+          </button>
+          <p className="mt-1 text-[11px] leading-snug text-neutral-600">
+            O arquivo é comum e pode ser reenviado por qualquer um. Quem garante a posse é o app.
+            O código <span className="font-mono">{carta.verify_code}</span> abre a página do dono atual.
+          </p>
 
           {!giroLiberado && (
             <button

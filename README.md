@@ -1,7 +1,7 @@
 # BELESMA — figurinhas
 
 Implementação de `BELESMA-BUILD.md` (a spec mestre, na pasta acima).
-**Estado: Fases 1 a 5 concluídas.** Fase 6 em diante não começou.
+**Estado: Fases 1 a 6 concluídas.** Só falta a Fase 7 (acabamento).
 
 Este projeto é novo e separado de `../belesma/`, que é a implementação da spec
 antiga (`BELESMA-SPEC.md`, modelo de cartas com `rarity`). Aquele projeto não
@@ -22,6 +22,8 @@ scripts/
                               confere contagens, selos, RLS e idempotência
   verificar-fase2.mjs         450 pacotes: distribuição, pity, reserva, authz
   verificar-fase5.mjs         trocas, vitrine, índice global, par de aura
+  verificar-fase6.mjs         forja, venda, restauro, loja e a auditoria de
+                              ciclos: nenhum fecha com lucro em baba
   trocas-http.mjs             corrida de aceite e realtime, no Supabase real
   fraude-http.mjs             o mesmo teste de fraude, mas contra o Supabase
                               real, por HTTP e com JWT do Auth
@@ -100,6 +102,9 @@ que funcionar com placeholder (spec §3).
 | `/album` | logado |
 | `/trocas` | logado |
 | `/conquistas` | logado |
+| `/forja` | logado |
+| `/loja` | logado |
+| `/v/<codigo>` | **público, sem login** |
 | `/perfil` | logado |
 | `/admin` | só `is_admin` — para os outros, 404 |
 

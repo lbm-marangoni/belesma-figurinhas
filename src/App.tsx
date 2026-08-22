@@ -10,6 +10,9 @@ import Perfil from './paginas/Perfil'
 import Album from './paginas/Album'
 import Trocas from './paginas/Trocas'
 import Conquistas from './paginas/Conquistas'
+import Forja from './paginas/Forja'
+import Loja from './paginas/Loja'
+import Verificar from './paginas/Verificar'
 
 export default function App() {
   return (
@@ -23,6 +26,14 @@ export default function App() {
 
 function Rotas() {
   const { sessao, jogador, carregando } = useSessao()
+
+  // /v/<codigo> e PUBLICA: nao exige login (spec §14)
+  const publica = (
+    <Routes>
+      <Route path="/v/:codigo" element={<Verificar />} />
+    </Routes>
+  )
+  if (window.location.pathname.includes('/v/')) return publica
 
   if (carregando) {
     return <main className="grid min-h-dvh place-items-center text-neutral-600">…</main>
@@ -39,6 +50,9 @@ function Rotas() {
         <Route path="/album" element={<Album />} />
         <Route path="/trocas" element={<Trocas />} />
         <Route path="/conquistas" element={<Conquistas />} />
+        <Route path="/forja" element={<Forja />} />
+        <Route path="/loja" element={<Loja />} />
+        <Route path="/v/:codigo" element={<Verificar />} />
         <Route path="/perfil" element={<Perfil />} />
         <Route path="/admin" element={<Admin />} />
         <Route path="*" element={<Navigate to="/colecao" replace />} />
@@ -89,13 +103,15 @@ function Shell() {
         <NavLink to="/trocas" className={aba}>
           Trocas {pendentes > 0 && <span className="selo-novo">{pendentes}</span>}
         </NavLink>
+        <NavLink to="/forja" className={aba}>Forja</NavLink>
+        <NavLink to="/loja" className={aba}>Loja</NavLink>
         <NavLink to="/conquistas" className={aba}>Conquistas</NavLink>
         {jogador.is_admin && <NavLink to="/admin" className={aba}>Admin</NavLink>}
       </nav>
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
         {/* Saldo sempre visível (spec §19.8). A moeda entra na Fase 6. */}
-        <span className="chip"><strong>{jogador.baba}</strong> baba</span>
+        <Link to="/loja" className="chip"><strong>{jogador.baba}</strong> baba</Link>
         <Link to="/perfil" className="aba">{jogador.nickname}</Link>
         <button onClick={sair} className="aba" title="sair">sair</button>
       </div>

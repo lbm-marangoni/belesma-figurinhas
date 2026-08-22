@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useSessao } from '../lib/sessao'
 import { Figurinha } from '../componentes/Figurinha'
 import { CartaAberta } from '../componentes/CartaAberta'
+import { baixarFigurinha } from '../lib/exportar'
 import { ROTULO_TIER, TIERS, type Carta, type Selo, type Tier } from '../lib/tipos'
 
 type Ordem = 'raridade' | 'raridade-asc' | 'personagem' | 'skin'
@@ -18,7 +19,9 @@ function melhorPrimeiro(a: Carta, b: Carta) {
 }
 
 export default function Colecao() {
-  const { jogador } = useSessao()
+  const { jogador, recarregar } = useSessao()
+  const [msg, setMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
+  const [ocupado, setOcupado] = useState(false)
   const [cartas, setCartas] = useState<Carta[] | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [personagem, setPersonagem] = useState('todos')
@@ -28,9 +31,9 @@ export default function Colecao() {
   const [aberta, setAberta] = useState<string | null>(null)
   const [emFoco, setEmFoco] = useState<number | null>(null)
 
-  useEffect(() => {
+  const recarregarAcervo = useCallback(async () => {
     if (!jogador) return
-    ;(async () => {
+    {
       const { data, error } = await supabase
         .from('card_copies')
         .select(`copy_id:id, serial_number, seal, origin, damage_level, forge_index, verify_code,
@@ -49,8 +52,35 @@ export default function Colecao() {
         character_slug: r.card_types.characters.slug,
         character_name: r.card_types.characters.name,
       })))
-    })()
+    }
   }, [jogador])
+
+  useEffect(() => { recarregarAcervo() }, [recarregarAcervo])
+
+  // Vender e IRREVERSIVEL: a copia volta ao pool marcada com desgaste e outra
+  // pessoa pode puxa-la (spec §19.4). Por isso a confirmacao explicita.
+  async function vender(c: Carta) {
+    if (!confirm(
+      `Vender ${c.character_slug} ${c.skin} ${c.serial_number}/${c.print_run}?
+
+` +
+      'Ela volta ao pool marcada com desgaste. Outra pessoa pode puxá-la em pacote.')) return
+    setOcupado(true); setMsg(null)
+    const { data, error } = await supabase.rpc('vender', { p_copy_id: c.copy_id })
+    setOcupado(false)
+    if (error) return setMsg({ tipo: 'erro', texto: error.message })
+    setMsg({ tipo: 'ok', texto: `Vendida por ${(data as any).valor} baba.` })
+    await recarregarAcervo(); await recarregar()
+  }
+
+  async function restaurar(c: Carta) {
+    setOcupado(true); setMsg(null)
+    const { data, error } = await supabase.rpc('restaurar', { p_copy_id: c.copy_id })
+    setOcupado(false)
+    if (error) return setMsg({ tipo: 'erro', texto: error.message })
+    setMsg({ tipo: 'ok', texto: `Restaurada por ${(data as any).custo} baba.` })
+    await recarregarAcervo(); await recarregar()
+  }
 
   const personagens = useMemo(
     () => [...new Set((cartas ?? []).map((c) => c.character_slug))].sort(), [cartas])
@@ -122,6 +152,12 @@ export default function Colecao() {
         </span>
       </div>
 
+      {msg && (
+        <p className={`mb-3 rounded-lg p-2 text-sm ${msg.tipo === 'ok' ? 'aviso-ok' : 'aviso-ruim'}`}>
+          {msg.texto}
+        </p>
+      )}
+
       {pilhas.length === 0 ? (
         <p className="py-16 text-center text-neutral-500">
           Nada aqui ainda. Abra um pacote.
@@ -145,10 +181,9 @@ export default function Colecao() {
               {aberta === chave && (
                 <ul className="mt-1 rounded border border-neutral-700 bg-neutral-900 p-1.5 text-[11px]">
                   {copias.map((c) => (
-                    <li key={c.copy_id}>
+                    <li key={c.copy_id} className="flex items-center gap-1 py-0.5">
                       <button onClick={() => setEmFoco(planas.indexOf(c))}
-                        className="flex w-full justify-between gap-2 py-0.5 font-mono tabular-nums
-                                   hover:text-white">
+                        className="flex flex-1 justify-between gap-2 font-mono tabular-nums hover:text-white">
                         <span className="text-neutral-300">
                           {c.origin === 'forge'
                             ? `FORJADA ${c.forge_index}`
@@ -156,6 +191,19 @@ export default function Colecao() {
                         </span>
                         {c.seal !== 'none' && <span className="text-neutral-500">selo {c.seal}</span>}
                       </button>
+                      <button title="baixar para o WhatsApp" disabled={ocupado}
+                        onClick={() => baixarFigurinha(c, jogador!.nickname)}
+                        className="px-1 text-neutral-500 hover:text-neutral-200">↓</button>
+                      {c.damage_level > 0 && (
+                        <button title="restaurar" disabled={ocupado}
+                          onClick={() => restaurar(c)}
+                          className="px-1 text-amber-500 hover:text-amber-300">✦</button>
+                      )}
+                      {copias.length > 1 && c.seal === 'none' && c.tier !== 'prisma' && (
+                        <button title="vender" disabled={ocupado}
+                          onClick={() => vender(c)}
+                          className="px-1 text-neutral-500 hover:text-[var(--acento)]">$</button>
+                      )}
                     </li>
                   ))}
                 </ul>
