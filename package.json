@@ -13,7 +13,8 @@
     "db:push": "supabase db push",
     "bundle-sql": "node scripts/bundle-sql.mjs",
     "importar-assets": "node scripts/importar-assets.mjs",
-    "verificar:fase2": "node scripts/verificar-fase2.mjs"
+    "verificar:fase2": "node scripts/verificar-fase2.mjs",
+    "verificar:fase5": "node scripts/verificar-fase5.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

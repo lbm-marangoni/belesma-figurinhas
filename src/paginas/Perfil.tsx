@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { emailDe, useSessao } from '../lib/sessao'
+import { Figurinha, serialDe } from '../componentes/Figurinha'
+import type { Carta } from '../lib/tipos'
 
 export default function Perfil() {
   const { jogador, recarregar } = useSessao()
@@ -10,6 +12,9 @@ export default function Perfil() {
   const [ok, setOk] = useState<string | null>(null)
   const [ocupado, setOcupado] = useState(false)
   const [historico, setHistorico] = useState<{ nickname: string; usado_ate: string }[]>([])
+  const [acervo, setAcervo] = useState<Carta[]>([])
+  const [vitrine, setVitrine] = useState<number[]>([])
+  const [avisoVitrine, setAvisoVitrine] = useState<string | null>(null)
 
   const formatoOk = /^[a-z0-9][a-z0-9_-]{2,19}$/.test(novo)
 
@@ -30,7 +35,39 @@ export default function Perfil() {
     return () => clearTimeout(t)
   }, [novo, formatoOk])
 
+  // acervo para montar a vitrine (spec §11)
+  useEffect(() => {
+    if (!jogador) return
+    ;(async () => {
+      const { data } = await supabase.from('card_copies').select(
+        `id, serial_number, seal, origin, damage_level, forge_index, verify_code,
+         card_types!inner ( print_run, tier, tier_order, skin, characters!inner ( slug, name ) )`)
+        .eq('owner_id', jogador.id).order('id')
+      setAcervo((data ?? []).map((r: any) => ({
+        copy_id: r.id, serial_number: r.serial_number, seal: r.seal, origin: r.origin,
+        damage_level: r.damage_level, forge_index: r.forge_index, verify_code: r.verify_code,
+        print_run: r.card_types.print_run, tier: r.card_types.tier,
+        tier_order: r.card_types.tier_order, skin: r.card_types.skin, art_path: '',
+        character_slug: r.card_types.characters.slug,
+        character_name: r.card_types.characters.name,
+      })))
+      const { data: me } = await supabase.rpc('me')
+      setVitrine([me?.showcase_1, me?.showcase_2, me?.showcase_3].filter(Boolean) as number[])
+    })()
+  }, [jogador, ok])
+
   if (!jogador) return null
+
+  function alternarVitrine(id: number) {
+    setAvisoVitrine(null)
+    setVitrine((v) => v.includes(id) ? v.filter((x) => x !== id)
+      : v.length >= 3 ? v : [...v, id])
+  }
+
+  async function salvarVitrine() {
+    const { error } = await supabase.rpc('set_showcase', { p_copy_ids: vitrine })
+    setAvisoVitrine(error ? error.message : 'Vitrine salva.')
+  }
 
   async function trocar(e: React.FormEvent) {
     e.preventDefault()
@@ -48,7 +85,7 @@ export default function Perfil() {
   }
 
   return (
-    <div className="max-w-lg p-4 sm:p-6">
+    <div className="max-w-2xl p-4 sm:p-6">
       <h2 className="text-lg font-medium">Perfil</h2>
       <dl className="mt-3 divide-y divide-neutral-800 border-y border-neutral-800 text-sm">
         <Linha rotulo="Apelido" valor={jogador.nickname} />
@@ -99,6 +136,45 @@ export default function Perfil() {
           </ul>
         </section>
       )}
+
+      {/* ------------------------------------------------------------ vitrine */}
+      <section className="mt-8">
+        <h3 className="text-sm font-medium">Vitrine</h3>
+        <p className="text-xs text-neutral-500">
+          Três figurinhas no seu perfil, visíveis para o grupo. {vitrine.length}/3 escolhidas.
+        </p>
+
+        {vitrine.length > 0 && (
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            {vitrine.map((id) => {
+              const c = acervo.find((x) => x.copy_id === id)
+              return c ? <Figurinha key={id} carta={c} tamanho="miniatura" /> : null
+            })}
+          </div>
+        )}
+
+        {avisoVitrine && <p className="mt-2 text-xs text-neutral-400">{avisoVitrine}</p>}
+
+        <button onClick={salvarVitrine}
+          className="mt-3 rounded bg-neutral-100 px-3 py-1 text-sm font-medium text-neutral-900">
+          salvar vitrine
+        </button>
+
+        <p className="mt-4 mb-1 text-xs text-neutral-500">Escolha no acervo:</p>
+        <div className="grid max-h-72 grid-cols-4 gap-2 overflow-y-auto rounded border border-neutral-800 p-2 sm:grid-cols-6">
+          {acervo.length === 0 && (
+            <p className="col-span-full py-6 text-center text-xs text-neutral-600">
+              sem figurinhas ainda
+            </p>
+          )}
+          {acervo.map((c) => (
+            <button key={c.copy_id} onClick={() => alternarVitrine(c.copy_id)} className="text-left">
+              <Figurinha carta={c} tamanho="miniatura" selecionada={vitrine.includes(c.copy_id)} />
+              <p className="mt-0.5 truncate text-[10px] text-neutral-600">{serialDe(c)}</p>
+            </button>
+          ))}
+        </div>
+      </section>
 
       <p className="mt-6 border-t border-neutral-800 pt-4 text-xs leading-relaxed text-neutral-500">
         Trocar de apelido troca também o seu login. As figurinhas continuam suas — a posse é do

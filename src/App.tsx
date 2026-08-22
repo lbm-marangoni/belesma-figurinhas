@@ -1,10 +1,15 @@
+import { useEffect, useState } from 'react'
 import { BrowserRouter, Link, NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { supabase } from './lib/supabase'
 import { ProvedorSessao, useSessao } from './lib/sessao'
 import Login from './paginas/Login'
 import Colecao from './paginas/Colecao'
 import Abrir from './paginas/Abrir'
 import Admin from './paginas/Admin'
 import Perfil from './paginas/Perfil'
+import Album from './paginas/Album'
+import Trocas from './paginas/Trocas'
+import Conquistas from './paginas/Conquistas'
 
 export default function App() {
   return (
@@ -31,6 +36,9 @@ function Rotas() {
         <Route path="/" element={<Navigate to="/colecao" replace />} />
         <Route path="/colecao" element={<Colecao />} />
         <Route path="/abrir" element={<Abrir />} />
+        <Route path="/album" element={<Album />} />
+        <Route path="/trocas" element={<Trocas />} />
+        <Route path="/conquistas" element={<Conquistas />} />
         <Route path="/perfil" element={<Perfil />} />
         <Route path="/admin" element={<Admin />} />
         <Route path="*" element={<Navigate to="/colecao" replace />} />
@@ -41,6 +49,24 @@ function Rotas() {
 
 function Shell() {
   const { jogador, sair } = useSessao()
+  const [pendentes, setPendentes] = useState(0)
+
+  // contador de propostas recebidas, atualizado por realtime
+  useEffect(() => {
+    if (!jogador) return
+    const contar = async () => {
+      const { count } = await supabase.from('trades')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending').eq('to_player', jogador.id)
+      setPendentes(count ?? 0)
+    }
+    contar()
+    const canal = supabase.channel('badge-trocas')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trades' }, contar)
+      .subscribe()
+    return () => { supabase.removeChannel(canal) }
+  }, [jogador])
+
   if (!jogador) return null
 
   const pacotes = jogador.packs_common + jogador.packs_rare + jogador.packs_ultra +
@@ -56,6 +82,11 @@ function Shell() {
       <NavLink to="/abrir" className={aba}>
         Abrir {pacotes > 0 && <span className="text-emerald-400">({pacotes})</span>}
       </NavLink>
+      <NavLink to="/album" className={aba}>Álbum</NavLink>
+      <NavLink to="/trocas" className={aba}>
+        Trocas {pendentes > 0 && <span className="text-emerald-400">({pendentes})</span>}
+      </NavLink>
+      <NavLink to="/conquistas" className={aba}>Conquistas</NavLink>
       <NavLink to="/perfil" className={aba}>Perfil</NavLink>
       {jogador.is_admin && <NavLink to="/admin" className={aba}>Admin</NavLink>}
 

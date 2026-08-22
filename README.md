@@ -1,7 +1,7 @@
 # BELESMA — figurinhas
 
 Implementação de `BELESMA-BUILD.md` (a spec mestre, na pasta acima).
-**Estado: Fases 1 a 4 concluídas.** Fase 5 em diante não começou.
+**Estado: Fases 1 a 5 concluídas.** Fase 6 em diante não começou.
 
 Este projeto é novo e separado de `../belesma/`, que é a implementação da spec
 antiga (`BELESMA-SPEC.md`, modelo de cartas com `rarity`). Aquele projeto não
@@ -21,6 +21,8 @@ scripts/
   verificar-fase1.mjs         roda as migrações num Postgres real (PGlite) e
                               confere contagens, selos, RLS e idempotência
   verificar-fase2.mjs         450 pacotes: distribuição, pity, reserva, authz
+  verificar-fase5.mjs         trocas, vitrine, índice global, par de aura
+  trocas-http.mjs             corrida de aceite e realtime, no Supabase real
   fraude-http.mjs             o mesmo teste de fraude, mas contra o Supabase
                               real, por HTTP e com JWT do Auth
   fluxo-http.mjs              cadastro -> abrir -> coleção -> admin, por HTTP
@@ -38,6 +40,7 @@ npm run verificar:fase2       # idem, com 450 pacotes abertos
 node scripts/fraude-http.mjs      # contra o Supabase real, por HTTP
 node scripts/fluxo-http.mjs       # fluxo do usuário de ponta a ponta
 node scripts/concorrencia-http.mjs # 72 pacotes simultâneos
+node scripts/trocas-http.mjs       # dois aceites na mesma carta + realtime
 ```
 
 O primeiro sobe um Postgres em WASM e aplica **as mesmas migrações** que vão
@@ -94,6 +97,10 @@ que funcionar com placeholder (spec §3).
 |---|---|
 | `/colecao` | logado |
 | `/abrir` | logado |
+| `/album` | logado |
+| `/trocas` | logado |
+| `/conquistas` | logado |
+| `/perfil` | logado |
 | `/admin` | só `is_admin` — para os outros, 404 |
 
 O `dist/404.html` é cópia do `index.html`: é o que faz link direto para
