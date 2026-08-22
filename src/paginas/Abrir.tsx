@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useSessao } from '../lib/sessao'
 import { Figurinha } from '../componentes/Figurinha'
@@ -22,8 +22,37 @@ export default function Abrir() {
   const [erro, setErro] = useState<string | null>(null)
   const [ocupado, setOcupado] = useState(false)
   const [emFoco, setEmFoco] = useState<number | null>(null)
+  const [diario, setDiario] = useState<{ pronto: boolean; falta: string } | null>(null)
+  const [avisoDiario, setAvisoDiario] = useState<string | null>(null)
+  const [estoque, setEstoque] = useState<{ tier: string; disponiveis: number; total: number }[]>([])
+
+  // quando volta o diário, e se algum tier está no fim (spec §8)
+  useEffect(() => {
+    if (!jogador) return
+    const t = jogador.last_daily_at ? new Date(jogador.last_daily_at).getTime() : 0
+    const volta = t + 24 * 3600 * 1000
+    const falta = volta - Date.now()
+    setDiario({
+      pronto: falta <= 0,
+      falta: falta <= 0 ? '' :
+        `${Math.floor(falta / 3600000)}h${String(Math.floor((falta % 3600000) / 60000)).padStart(2, '0')}`,
+    })
+    supabase.rpc('estoque_publico').then(({ data }) => setEstoque((data as any)?.por_tier ?? []))
+  }, [jogador])
 
   if (!jogador) return null
+
+  async function resgatar() {
+    setAvisoDiario(null)
+    const { data, error } = await supabase.rpc('claim_daily')
+    if (error) return setAvisoDiario(error.message)
+    const d = data as any
+    setAvisoDiario(
+      `+${d.comuns} comum, +${d.raros} raro${d.ultra ? ', +1 ULTRA' : ''} · ` +
+      `+${d.baba} baba (streak ${d.streak})` +
+      (d.ultra ? '' : ` · ultra em ${d.proximo_ultra_em} resgate(s)`))
+    await recarregar()
+  }
 
   const pilhas: [TipoPacote, string, number, number][] = [
     ['comum', 'Comum', jogador.packs_common, jogador.packs_common_daily],
@@ -43,6 +72,35 @@ export default function Abrir() {
 
   return (
     <div className="p-4 sm:p-6">
+      {/* ------------------------------------------------------------ diário */}
+      {!animando && (
+        <div className="painel mb-4 flex flex-wrap items-center gap-3 p-3">
+          <div className="text-sm">
+            <p className="font-medium">Diário</p>
+            <p className="text-xs text-neutral-500">
+              2 comuns + 1 raro a cada 24h · 1 ultra a cada 3 resgates
+            </p>
+          </div>
+          <button onClick={resgatar} disabled={!diario?.pronto}
+            className="btn btn-forte ml-auto">
+            {diario?.pronto ? 'resgatar' : `volta em ${diario?.falta ?? '…'}`}
+          </button>
+          {avisoDiario && (
+            <p className="w-full rounded-lg p-2 text-sm aviso-ok">{avisoDiario}</p>
+          )}
+        </div>
+      )}
+
+      {/* cascata de esgotamento: avisar com honestidade (spec §8) */}
+      {!animando && estoque.filter((e) => e.disponiveis === 0).length > 0 && (
+        <p className="mb-4 rounded-lg p-2 text-sm aviso-ruim">
+          Esgotou no mundo:{' '}
+          <strong>{estoque.filter((e) => e.disponiveis === 0).map((e) => e.tier).join(', ')}</strong>.
+          Os pacotes redistribuem dentro da própria tabela de odds, então a garantia do Raro e do
+          Ultra continua valendo — mas esses tiers não saem mais.
+        </p>
+      )}
+
       {!animando && (
         <div className="flex flex-wrap gap-3">
           {pilhas.map(([tipo, rotulo, n, nd]) => (

@@ -15,7 +15,8 @@
     "importar-assets": "node scripts/importar-assets.mjs",
     "verificar:fase2": "node scripts/verificar-fase2.mjs",
     "verificar:fase5": "node scripts/verificar-fase5.mjs",
-    "verificar:fase6": "node scripts/verificar-fase6.mjs"
+    "verificar:fase6": "node scripts/verificar-fase6.mjs",
+    "verificar:fase7": "node scripts/verificar-fase7.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

@@ -29,6 +29,7 @@ jobs:
       - run: npm run verificar:fase2
       - run: npm run verificar:fase5
       - run: npm run verificar:fase6
+      - run: npm run verificar:fase7
       - run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
