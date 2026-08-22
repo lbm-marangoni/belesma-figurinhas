@@ -98,8 +98,13 @@ const { data: acervo, error: eCol } = await c
 checar('le o proprio acervo pela anon key', !eCol, eCol?.message)
 checar('acervo tem as cartas abertas', (acervo?.length ?? 0) >= 40, `${acervo?.length} copias`)
 
+// So as PUXADAS sao 6642. A forja cria supply PARALELO (spec §7), entao a
+// contagem total de card_copies cresce alem disso de proposito.
+const { count: puxadas } = await c.from('card_copies')
+  .select('id', { count: 'exact', head: true }).eq('origin', 'pull')
+checar('a tiragem puxavel segue em 6642', puxadas === 6642, `${puxadas}`)
 const { count: total } = await c.from('card_copies').select('id', { count: 'exact', head: true })
-checar('indice global continua publico', total === 6642, `${total}`)
+checar('indice global continua publico', (total ?? 0) >= 6642, `${total} linhas`)
 
 // ================================================================ admin
 console.log('\n== /admin so para admin ==')
