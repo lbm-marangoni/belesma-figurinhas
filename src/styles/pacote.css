@@ -14,13 +14,33 @@
  * vidro. Foi exatamente o bug da primeira versão.
  */
 
+/* A abertura ocupa a tela inteira e centraliza o pacote. Antes ele ficava
+   colado no topo e puxar a carta exigia arrastar quase fora da janela. */
+.abertura {
+  min-height: calc(100dvh - 8.5rem);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Caixa mais alta que o pacote: a folga de cima é onde a figurinha aparece.
+   Com o pacote alinhado ao rodapé desta caixa, centralizar a caixa deixa o
+   pacote um pouco abaixo do meio da tela — que é onde a mão alcança. */
+.palco-abertura {
+  position: relative;
+  width: min(320px, 74vw);
+  aspect-ratio: 866 / 1760;
+  display: flex;
+  align-items: flex-end;
+}
+
 .cena {
   perspective: 1100px;
   perspective-origin: 50% 45%;
   position: relative;
-  width: min(280px, 66vw);
+  width: 100%;
   aspect-ratio: 866 / 1280;
-  margin-inline: auto;
 }
 
 /* Sombra de contato no chão. Sem ela o pacote flutua e o 3D não convence,
@@ -217,11 +237,21 @@
 .carta-puxada.assentando { transition: transform 320ms cubic-bezier(.2,.8,.25,1); }
 .carta-puxada.saindo     { transition: transform 260ms ease-in; }
 
+/* A carta fica espiando um pedaço para fora e PULA, para o olho achar e a
+   mão saber onde pegar. O pulo mora num wrapper interno: se fosse no mesmo
+   elemento, brigaria com o transform do arraste. */
+.espiando { animation: pular 1.25s ease-in-out infinite; }
+@keyframes pular {
+  0%, 100% { transform: translateY(0); }
+  45%      { transform: translateY(-9px); }
+  60%      { transform: translateY(-4px); }
+}
+
 /* pega para arrastar: fica sobre a boca, é o que recebe o ponteiro */
 .pega {
   position: absolute;
-  left: 8%; right: 8%;
-  height: 34%;
+  left: 2%; right: 2%;
+  height: 52%;
   z-index: 6;
   cursor: grab;
   touch-action: none;
@@ -245,7 +275,7 @@
 /* ---------------------------------------------------------------- reduzido */
 @media (prefers-reduced-motion: reduce) {
   .pacote.idle, .tremendo, .mylar, .brilho-quente,
-  .metade-cima, .foil, .dica-puxar {
+  .metade-cima, .foil, .dica-puxar, .espiando {
     animation: none !important;
   }
   .pacote { transition: none !important; }

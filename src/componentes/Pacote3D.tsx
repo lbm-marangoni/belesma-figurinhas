@@ -17,6 +17,10 @@ import '../styles/pacote.css'
 
 type Etapa = 'idle' | 'tremor' | 'rasgando' | 'puxando' | 'final'
 
+/** Quanto da carta fica espiando para fora enquanto ninguém puxa. É o que
+ *  faz o jogador enxergar que tem algo ali e saber onde pegar. */
+const REPOUSO = 0.17
+
 /** Linha de rasgo irregular logo abaixo do lacre, sorteada a cada abertura. */
 function linhaDeRasgo() {
   const base = 24
@@ -43,12 +47,12 @@ export function Pacote3D({
   const [etapa, setEtapa] = useState<Etapa>('idle')
   const [foils, setFoils] = useState<React.CSSProperties[]>([])
   const [indice, setIndice] = useState(0)
-  const [puxada, setPuxada] = useState(0)               // 0..1 da carta atual
+  const [puxada, setPuxada] = useState(REPOUSO)         // 0..1 da carta atual
   const [transicao, setTransicao] = useState<'' | 'assentando' | 'saindo'>('')
   const [reveladas, setReveladas] = useState<Carta[]>([])
 
   const cena = useRef<HTMLDivElement>(null)
-  const arrasto = useRef<{ y0: number; alcance: number } | null>(null)
+  const arrasto = useRef<{ y0: number; alcance: number; moveu: boolean } | null>(null)
   const rasgo = useMemo(linhaDeRasgo, [])
 
   const reduzido = typeof window !== 'undefined' &&
@@ -124,7 +128,7 @@ export function Pacote3D({
       setReveladas((r) => [...r, cartas[indice]])
       const proximo = indice + 1
       setTransicao('')
-      setPuxada(0)
+      setPuxada(REPOUSO)
       if (proximo >= cartas.length) setEtapa('final')
       else setIndice(proximo)
     }, 280)
@@ -136,23 +140,25 @@ export function Pacote3D({
     // alcance = altura da própria figurinha, derivada da largura da cena.
     // A cena não carrega transform, então o rect dela é estável (spec §12).
     const r = cena.current!.getBoundingClientRect()
-    arrasto.current = { y0: e.clientY, alcance: r.width * 0.62 }
+    arrasto.current = { y0: e.clientY, alcance: r.width * 0.62, moveu: false }
   }
 
   const aoMover = (e: React.PointerEvent) => {
     if (!arrasto.current || transicao) return
     const { y0, alcance } = arrasto.current
-    setPuxada(Math.min(1, Math.max(0, (y0 - e.clientY) / alcance)))
+    if (Math.abs(y0 - e.clientY) > 3) arrasto.current.moveu = true
+    setPuxada(Math.min(1, Math.max(REPOUSO, REPOUSO + (y0 - e.clientY) / alcance)))
   }
 
   const aoSoltar = () => {
     if (!arrasto.current) return
+    const { moveu } = arrasto.current
     const p = puxada
     arrasto.current = null
     // passou da metade, ou foi clique seco sem arrastar: sai de vez
-    if (p > 0.45 || p < 0.02) return concluir()
+    if (p > 0.5 || !moveu) return concluir()
     setTransicao('assentando')
-    setPuxada(0)
+    setPuxada(REPOUSO)
     setTimeout(() => setTransicao(''), 320)
   }
 
@@ -162,7 +168,8 @@ export function Pacote3D({
   const atual = cartas[indice]
 
   return (
-    <div className="select-none py-4">
+    <div className="abertura select-none py-4">
+      <div className="palco-abertura">
       <div
         ref={cena}
         className="cena"
@@ -180,7 +187,10 @@ export function Pacote3D({
         {etapa === 'puxando' && atual && (
           <div className="janela" style={{ bottom: `${100 - rasgo.y}%` }}>
             <div className={`carta-puxada ${transicao}`}>
-              <Figurinha carta={atual} tamanho="media" shader />
+              {/* o pulo fica aqui dentro para não brigar com o transform do arraste */}
+              <div className={puxada <= REPOUSO + 0.01 && !transicao ? 'espiando' : ''}>
+                <Figurinha carta={atual} tamanho="media" shader />
+              </div>
             </div>
           </div>
         )}
@@ -209,7 +219,7 @@ export function Pacote3D({
         {etapa === 'puxando' && atual && (
           <div
             className="pega"
-            style={{ top: `${rasgo.y - 6}%` }}
+            style={{ top: `${rasgo.y - 20}%` }}
             onPointerDown={aoDescer}
             onPointerMove={aoMover}
             onPointerUp={aoSoltar}
@@ -221,13 +231,14 @@ export function Pacote3D({
           <div className="absolute inset-0 cursor-pointer" onClick={() => setEtapa('tremor')} />
         )}
       </div>
+      </div>
 
       <p className="mt-4 text-center text-xs text-neutral-500">
         {etapa === 'idle' && 'clique no pacote para abrir'}
         {(etapa === 'tremor' || etapa === 'rasgando') && '…'}
         {etapa === 'puxando' && (
           <span className="dica-puxar relative block">
-            arraste a carta para cima · {indice + 1} de {cartas.length}
+            puxe a carta para cima · {indice + 1} de {cartas.length}
           </span>
         )}
       </p>
