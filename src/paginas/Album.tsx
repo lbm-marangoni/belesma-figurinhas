@@ -181,6 +181,9 @@ export default function Album() {
   const props = {
     tipos, coladas: coladasValidas, minhas,
     slotAlvo, colandoAgora, aoAbrir: setEmFoco,
+    // enquanto se arrasta, o destino é marcado ANTES de o dedo chegar lá.
+    // A crítica mais comum ao TCG Pocket é justamente o gesto sem alvo.
+    tipoArrastado: arrastando ? ((arrastando as any).card_type_id as number) : null,
   }
 
   return (
@@ -278,13 +281,14 @@ export default function Album() {
 
 // ================================================================ página
 function Pagina({
-  spread, lado, tipos, coladas, minhas, slotAlvo, colandoAgora, aoAbrir, nua,
+  spread, lado, tipos, coladas, minhas, slotAlvo, colandoAgora, aoAbrir, nua, tipoArrastado,
 }: {
   spread: Spread; lado: 'esq' | 'dir'
   tipos: Tipo[]; coladas: Map<number, Carta>; minhas: Carta[]
   slotAlvo: number | null; colandoAgora: number | null
   aoAbrir: (c: Carta) => void
   nua?: boolean
+  tipoArrastado?: number | null
 }) {
   const classe = `pagina pagina-${lado}${nua ? '' : ''}`
 
@@ -361,8 +365,8 @@ function Pagina({
               <p className="linha-skin">{skin.replace('-', ' ')}</p>
               {daSkin.map((t) => (
                 <Slot key={t.id} tipo={t} carta={coladas.get(t.id)}
-                      alvo={slotAlvo === t.id} colando={colandoAgora === t.id}
-                      aoAbrir={aoAbrir} />
+                      alvo={slotAlvo === t.id} marcado={tipoArrastado === t.id}
+                      colando={colandoAgora === t.id} aoAbrir={aoAbrir} />
               ))}
             </div>
           )
@@ -373,16 +377,22 @@ function Pagina({
   )
 }
 
-function Slot({ tipo, carta, alvo, colando, aoAbrir }: {
-  tipo: Tipo; carta?: Carta; alvo: boolean; colando: boolean
+function Slot({ tipo, carta, alvo, marcado, colando, aoAbrir }: {
+  tipo: Tipo; carta?: Carta; alvo: boolean; marcado: boolean; colando: boolean
   aoAbrir: (c: Carta) => void
 }) {
   const nome = tipo.character_name.replace('Belesma do ', '')
   if (!carta) {
     return (
       <div>
-        <div data-slot={tipo.id} className={`slot slot-vazio ${alvo ? 'slot-alvo' : ''}`}>?</div>
-        <p className="mt-1 truncate text-center text-[10px] text-neutral-600">{nome}</p>
+        <div data-slot={tipo.id}
+          className={`slot slot-vazio ${marcado ? 'slot-marcado' : ''} ${alvo ? 'slot-alvo' : ''}`}>
+          {/* enquanto a figurinha está na mão, o destino vira um "+" */}
+          {marcado ? <span className="mais-colar">+</span> : '?'}
+        </div>
+        <p className={`mt-1 truncate text-center text-[10px] ${marcado ? 'text-[var(--luz)]' : 'text-neutral-600'}`}>
+          {marcado ? 'cole aqui' : nome}
+        </p>
       </div>
     )
   }

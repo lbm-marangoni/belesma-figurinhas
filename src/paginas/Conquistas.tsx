@@ -25,6 +25,35 @@ type Rank = {
   melhor_print_run: number; unos: number
 }
 
+/**
+ * Miniatura do TIPO, não de uma cópia. O índice global fala de tipos — não
+ * há serial para desenhar, e a arte pode nem ser sua. Não descoberto fica
+ * preto com "?" (spec §11).
+ */
+function Selo({ personagem, skin, tier, descoberto, titulo }: {
+  personagem: string; skin: string; tier: Tier; descoberto: boolean; titulo: string
+}) {
+  if (!descoberto) {
+    return (
+      <div title="ainda não descoberta"
+        className="grid aspect-square place-items-center rounded border border-neutral-800
+                   bg-black text-sm font-bold text-neutral-700">
+        ?
+      </div>
+    )
+  }
+  return (
+    <div title={titulo} className="relative aspect-square overflow-hidden rounded"
+         style={{ border: `1.5px solid ${COR_TIER[tier]}` }}>
+      <img
+        src={`${import.meta.env.BASE_URL}figurinhas/${personagem}/${skin}.jpg`}
+        alt={skin} loading="lazy"
+        className="h-full w-full object-cover"
+      />
+    </div>
+  )
+}
+
 export default function Conquistas() {
   const [indice, setIndice] = useState<Indice | null>(null)
   const [pares, setPares] = useState<Par[]>([])
@@ -98,6 +127,16 @@ export default function Conquistas() {
                 </span>
                 <span className="text-neutral-500">{achados}/{p.tipos.length} skins</span>
               </button>
+
+              {/* a fileira de figurinhas do personagem, sempre visível */}
+              <div className="grid grid-cols-9 gap-1 border-t border-neutral-900 px-3 py-2
+                              sm:grid-cols-14 md:grid-cols-[repeat(27,minmax(0,1fr))]">
+                {p.tipos.map((t) => (
+                  <Selo key={t.skin} personagem={p.slug} skin={t.skin} tier={t.tier}
+                        descoberto={t.descoberto}
+                        titulo={`${t.skin} · ${ROTULO_TIER[t.tier]} · ${t.distribuidas}/${t.print_run} distribuídas`} />
+                ))}
+              </div>
 
               {aberto === p.slug && (
                 <table className="w-full border-t border-neutral-800 text-left text-xs">

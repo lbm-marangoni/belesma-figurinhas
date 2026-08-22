@@ -5,6 +5,9 @@ import { Figurinha } from '../componentes/Figurinha'
 import { CartaAberta } from '../componentes/CartaAberta'
 import { ROTULO_TIER, TIERS, type Carta, type Selo, type Tier } from '../lib/tipos'
 
+type Ordem = 'raridade' | 'raridade-asc' | 'personagem' | 'skin'
+           | 'serial' | 'repetidas' | 'recentes'
+
 /** Repetidas do mesmo card_type empilham. A da frente é a de melhor serial:
  *  selada tem prioridade, depois o menor número (spec §11). */
 function melhorPrimeiro(a: Carta, b: Carta) {
@@ -21,6 +24,7 @@ export default function Colecao() {
   const [personagem, setPersonagem] = useState('todos')
   const [tier, setTier] = useState<'todos' | Tier>('todos')
   const [selo, setSelo] = useState<'todos' | Exclude<Selo, 'none'> | 'nenhum'>('todos')
+  const [ordem, setOrdem] = useState<Ordem>('raridade')
   const [aberta, setAberta] = useState<string | null>(null)
   const [emFoco, setEmFoco] = useState<number | null>(null)
 
@@ -65,10 +69,23 @@ export default function Colecao() {
     }
     return [...mapa.entries()]
       .map(([k, v]) => ({ chave: k, copias: v.sort(melhorPrimeiro) }))
-      .sort((a, b) =>
-        a.copias[0].tier_order - b.copias[0].tier_order ||
-        a.copias[0].character_slug.localeCompare(b.copias[0].character_slug))
-  }, [cartas, personagem, tier, selo])
+      .sort((A, B) => {
+        const a = A.copias[0], b = B.copias[0]
+        switch (ordem) {
+          case 'raridade':     return b.tier_order - a.tier_order || a.skin.localeCompare(b.skin)
+          case 'raridade-asc': return a.tier_order - b.tier_order || a.skin.localeCompare(b.skin)
+          case 'personagem':   return a.character_slug.localeCompare(b.character_slug) ||
+                                      a.tier_order - b.tier_order
+          case 'skin':         return a.skin.localeCompare(b.skin) ||
+                                      a.character_slug.localeCompare(b.character_slug)
+          case 'serial':       return a.serial_number - b.serial_number
+          case 'repetidas':    return B.copias.length - A.copias.length ||
+                                      b.tier_order - a.tier_order
+          case 'recentes':     return b.copy_id - a.copy_id
+          default:             return 0
+        }
+      })
+  }, [cartas, personagem, tier, selo, ordem])
 
   // O overlay navega pela lista inteira que está na tela, na mesma ordem
   // das pilhas — seta pra direita continua de onde o olho parou.
@@ -89,6 +106,16 @@ export default function Colecao() {
         <Selecao valor={selo} aoMudar={(v) => setSelo(v as any)}
           opcoes={[['todos', 'Com e sem selo'], ['nenhum', 'Sem selo'],
                    ...selo3.map((s) => [s, `Selo ${s}`] as [string, string])]} />
+        <Selecao valor={ordem} aoMudar={(v) => setOrdem(v as Ordem)}
+          opcoes={[
+            ['raridade', 'Mais rara primeiro'],
+            ['raridade-asc', 'Mais comum primeiro'],
+            ['personagem', 'Por personagem'],
+            ['skin', 'Por skin (A–Z)'],
+            ['serial', 'Menor serial'],
+            ['repetidas', 'Mais repetidas'],
+            ['recentes', 'Mais recentes'],
+          ]} />
         <span className="ml-auto flex gap-2">
           <span className="chip"><strong>{cartas.length}</strong> cópias</span>
           <span className="chip"><strong>{pilhas.length}</strong> tipos</span>

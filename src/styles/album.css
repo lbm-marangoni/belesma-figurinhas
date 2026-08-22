@@ -191,6 +191,27 @@
   font-size: 1.4rem;
   font-weight: 800;
 }
+/* Assim que a figurinha sai do deck, o destino dela ja fica MARCADO - antes
+   de o dedo chegar perto. Sinalizar o alvo cedo e o que faltava. */
+.slot-marcado {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--luz) 70%, transparent);
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 48%, color-mix(in srgb, var(--luz) 16%, transparent), transparent 72%),
+    color-mix(in srgb, var(--papel2) 80%, #000);
+}
+.mais-colar {
+  font-size: 2rem;
+  font-weight: 300;
+  line-height: 1;
+  color: var(--luz);
+  animation: mais-respira 1.1s ease-in-out infinite;
+}
+@keyframes mais-respira {
+  0%, 100% { transform: scale(1);    opacity: .72; }
+  50%      { transform: scale(1.22); opacity: 1; }
+}
+
 /* alvo iluminado enquanto o jogador arrasta a figurinha certa */
 .slot-alvo {
   border-color: var(--luz);
@@ -310,7 +331,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .virando-frente, .virando-tras, .sombra-varrida, .sombra-dobra,
-  .colando, .colando::after, .moldura-aura, .slot-alvo {
+  .colando, .colando::after, .moldura-aura, .slot-alvo, .mais-colar {
     animation: none !important;
   }
 }
