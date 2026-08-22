@@ -37,6 +37,11 @@ const EMAIL = `${NICK}@belesma.local`
   if (v) { await admin.from('players').delete().eq('id', v.id); await admin.auth.admin.deleteUser(v.id) }
 }
 
+// linha de base: quantas copias JA tinham dono antes do teste. O banco tem
+// jogadores de verdade, entao a afericao e por delta, nunca por zero absoluto.
+const { count: comDonoAntes } = await admin.from('card_copies')
+  .select('id', { count: 'exact', head: true }).not('owner_id', 'is', null)
+
 const c = createClient(URL, ANON, { auth: { persistSession: false } })
 
 // ================================================================ cadastro
@@ -137,17 +142,33 @@ checar('admin le o admin_log', Array.isArray(logs), `${logs?.length} linhas`)
 
 // ================================================================ limpeza
 console.log('\nlimpando...')
+// LIMPEZA: escopo restrito aos usuarios de teste.
+//
+// A versao anterior fazia delete().neq('id', 0) em copy_history,
+// pack_openings e admin_log - ou seja, GLOBAL. Isso apaga o historico de
+// jogadores de verdade. Script de teste nao pode encostar em dado real.
 await c.rpc('admin_reset_player_collection', { p_nickname: NICK })
-await admin.from('pack_opening_cards').delete().neq('id', 0)
-await admin.from('pack_openings').delete().neq('id', 0)
-await admin.from('copy_history').delete().neq('id', 0)
-await admin.from('admin_log').delete().neq('id', 0)
+
+const { data: aberturas } = await admin.from('pack_openings').select('id').eq('player_id', pl.id)
+const idsAbertura = (aberturas ?? []).map((a) => a.id)
+if (idsAbertura.length) await admin.from('pack_opening_cards').delete().in('opening_id', idsAbertura)
+await admin.from('pack_openings').delete().eq('player_id', pl.id)
+await admin.from('copy_history').delete().eq('to_player', pl.id)
+await admin.from('copy_history').delete().eq('from_player', pl.id)
+await admin.from('admin_log').delete().eq('admin_id', pl.id)
+await admin.from('album_colagem').delete().eq('player_id', pl.id)
+
 await c.auth.signOut()
 await admin.from('players').delete().eq('id', pl.id)
 await admin.auth.admin.deleteUser(pl.id)
+
 const { count: sobrou } = await admin.from('card_copies')
+  .select('id', { count: 'exact', head: true }).eq('owner_id', pl.id)
+checar('a cobaia nao deixou nenhuma copia para tras', sobrou === 0, `${sobrou}`)
+const { count: agora } = await admin.from('card_copies')
   .select('id', { count: 'exact', head: true }).not('owner_id', 'is', null)
-checar('banco voltou ao estado de lancamento', sobrou === 0, `${sobrou} com dono`)
+checar('o acervo dos jogadores REAIS ficou intacto', agora === comDonoAntes,
+  `${comDonoAntes} antes, ${agora} depois`)
 
 console.log(`\n${falhas === 0 ? 'TUDO PASSOU' : falhas + ' FALHA(S)'}`)
 process.exit(falhas === 0 ? 0 : 1)

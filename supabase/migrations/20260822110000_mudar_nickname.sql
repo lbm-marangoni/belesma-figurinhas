@@ -42,10 +42,13 @@ stable
 security definer
 set search_path = public, extensions, pg_temp
 as $$
+  -- Apelido EM USO nunca esta disponivel, nem para o proprio dono: quem
+  -- digita o proprio apelido no formulario de troca recebe "ja esta em uso",
+  -- que e verdade. A excecao vale so para o HISTORICO - retomar um apelido
+  -- que ja foi seu continua liberado.
   select not exists (
     select 1 from public.players
     where nickname = p_nickname::extensions.citext
-      and id is distinct from auth.uid()
   ) and not exists (
     select 1 from public.nickname_history
     where nickname = p_nickname::extensions.citext

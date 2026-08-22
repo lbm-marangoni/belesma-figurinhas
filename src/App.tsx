@@ -72,29 +72,32 @@ function Shell() {
   const pacotes = jogador.packs_common + jogador.packs_rare + jogador.packs_ultra +
     jogador.packs_common_daily + jogador.packs_rare_daily + jogador.packs_ultra_daily
 
-  const aba = ({ isActive }: { isActive: boolean }) =>
-    `px-3 py-2 text-sm ${isActive ? 'text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`
+  const aba = ({ isActive }: { isActive: boolean }) => `aba ${isActive ? 'aba-ativa' : ''}`
 
   return (
-    <header className="flex flex-wrap items-center gap-1 border-b border-neutral-800 px-4 py-2">
-      <Link to="/colecao" className="mr-3 font-semibold tracking-tight">BELESMA</Link>
-      <NavLink to="/colecao" className={aba}>Coleção</NavLink>
-      <NavLink to="/abrir" className={aba}>
-        Abrir {pacotes > 0 && <span className="text-emerald-400">({pacotes})</span>}
-      </NavLink>
-      <NavLink to="/album" className={aba}>Álbum</NavLink>
-      <NavLink to="/trocas" className={aba}>
-        Trocas {pendentes > 0 && <span className="text-emerald-400">({pendentes})</span>}
-      </NavLink>
-      <NavLink to="/conquistas" className={aba}>Conquistas</NavLink>
-      <NavLink to="/perfil" className={aba}>Perfil</NavLink>
-      {jogador.is_admin && <NavLink to="/admin" className={aba}>Admin</NavLink>}
+    <header className="topo">
+      <Link to="/colecao" className="marca mr-2 text-lg">
+        BELESMA
+      </Link>
 
-      <div className="ml-auto flex items-center gap-3 text-sm">
+      <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+        <NavLink to="/colecao" className={aba}>Coleção</NavLink>
+        <NavLink to="/album" className={aba}>Álbum</NavLink>
+        <NavLink to="/abrir" className={aba}>
+          Abrir {pacotes > 0 && <span className="selo-novo">{pacotes}</span>}
+        </NavLink>
+        <NavLink to="/trocas" className={aba}>
+          Trocas {pendentes > 0 && <span className="selo-novo">{pendentes}</span>}
+        </NavLink>
+        <NavLink to="/conquistas" className={aba}>Conquistas</NavLink>
+        {jogador.is_admin && <NavLink to="/admin" className={aba}>Admin</NavLink>}
+      </nav>
+
+      <div className="ml-auto flex shrink-0 items-center gap-2">
         {/* Saldo sempre visível (spec §19.8). A moeda entra na Fase 6. */}
-        <span className="text-neutral-400">{jogador.baba} baba</span>
-        <Link to="/perfil" className="text-neutral-300">{jogador.nickname}</Link>
-        <button onClick={sair} className="text-neutral-500 underline underline-offset-4">sair</button>
+        <span className="chip"><strong>{jogador.baba}</strong> baba</span>
+        <Link to="/perfil" className="aba">{jogador.nickname}</Link>
+        <button onClick={sair} className="aba" title="sair">sair</button>
       </div>
     </header>
   )

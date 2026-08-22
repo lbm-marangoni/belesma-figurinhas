@@ -89,8 +89,9 @@ export default function Colecao() {
         <Selecao valor={selo} aoMudar={(v) => setSelo(v as any)}
           opcoes={[['todos', 'Com e sem selo'], ['nenhum', 'Sem selo'],
                    ...selo3.map((s) => [s, `Selo ${s}`] as [string, string])]} />
-        <span className="ml-auto text-neutral-500">
-          {cartas.length} cópias · {pilhas.length} tipos
+        <span className="ml-auto flex gap-2">
+          <span className="chip"><strong>{cartas.length}</strong> cópias</span>
+          <span className="chip"><strong>{pilhas.length}</strong> tipos</span>
         </span>
       </div>
 
@@ -110,10 +111,7 @@ export default function Colecao() {
                   : setAberta(aberta === chave ? null : chave)}
               />
               {copias.length > 1 && (
-                <span className="absolute -right-1 -top-1 rounded-full bg-neutral-100 px-1.5 py-0.5
-                                 text-[10px] font-bold text-neutral-900">
-                  x{copias.length}
-                </span>
+                <span className="selo-novo absolute -right-1.5 -top-1.5">x{copias.length}</span>
               )}
 
               {/* leque com todos os seriais */}
@@ -156,8 +154,7 @@ function Selecao({ valor, aoMudar, opcoes }: {
   valor: string; aoMudar: (v: string) => void; opcoes: [string, string][]
 }) {
   return (
-    <select value={valor} onChange={(e) => aoMudar(e.target.value)}
-      className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-200 outline-none">
+    <select value={valor} onChange={(e) => aoMudar(e.target.value)} className="campo">
       {opcoes.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
     </select>
   )

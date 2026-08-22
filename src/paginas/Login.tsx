@@ -48,7 +48,7 @@ export default function Login() {
   return (
     <main className="grid min-h-dvh place-items-center p-6">
       <form onSubmit={enviar} className="w-full max-w-sm">
-        <h1 className="text-3xl font-semibold tracking-tight">BELESMA</h1>
+        <h1 className="marca text-4xl">BELESMA</h1>
         <p className="mt-1 text-sm text-neutral-400">
           {modo === 'entrar' ? 'Entrar na coleção' : 'Criar apelido'}
         </p>
@@ -59,8 +59,7 @@ export default function Login() {
             value={apelido}
             onChange={(e) => setApelido(e.target.value.toLowerCase().trim())}
             autoComplete="username"
-            className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2
-                       text-base text-neutral-100 outline-none focus:border-neutral-500"
+            className="campo mt-1 w-full text-base"
           />
         </label>
 
@@ -71,20 +70,18 @@ export default function Login() {
             value={senha}
             onChange={(e) => setSenha(e.target.value)}
             autoComplete={modo === 'criar' ? 'new-password' : 'current-password'}
-            className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2
-                       text-base text-neutral-100 outline-none focus:border-neutral-500"
+            className="campo mt-1 w-full text-base"
           />
         </label>
 
         {erro && (
-          <p className="mt-3 rounded border border-red-900 bg-red-950/50 p-2 text-sm text-red-300">{erro}</p>
+          <p className="aviso-ruim mt-3 rounded-lg p-2 text-sm">{erro}</p>
         )}
 
         <button
           type="submit"
           disabled={ocupado}
-          className="mt-4 w-full rounded bg-neutral-100 px-3 py-2 font-medium text-neutral-900
-                     disabled:opacity-50"
+          className="btn btn-forte mt-4 w-full py-2"
         >
           {ocupado ? '...' : modo === 'entrar' ? 'Entrar' : 'Criar'}
         </button>

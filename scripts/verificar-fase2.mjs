@@ -143,9 +143,11 @@ for (const [tipo, n] of [['comum', 300], ['raro', 100], ['ultra', 50]]) {
     if (tipo === 'raro' && melhor < ordem.epica) raroAbaixo++
     if (tipo === 'ultra' && melhor < ordem.mitica) ultraAbaixo++
 
-    // regra dura: diamante/prisma nunca em slot garantido
-    if (r.quente || r.pity || r.promovidos > 0) {
-      if (r.cartas.some((c) => c.tier === 'diamante' || c.tier === 'prisma')) duroEmGarantido++
+    // Regra dura, conferida por CARTA e nao por pacote: um Comum com
+    // promocao pode legitimamente trazer um diamante no slot de hit
+    // NATURAL. O que a spec proibe e diamante/prisma em slot GARANTIDO.
+    for (const c of r.cartas) {
+      if (c.garantido && (c.tier === 'diamante' || c.tier === 'prisma')) duroEmGarantido++
     }
     // distribuicao so do pacote comum sem promocao/quente, para nao poluir
     if (tipo === 'comum' && !r.quente && r.promovidos === 0 && !r.pity && hit.length === 1) {

@@ -23,6 +23,11 @@ const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY
 if (!SERVICE) { console.error('falta SUPABASE_SERVICE_ROLE_KEY'); process.exit(2) }
 
 const admin = createClient(URL, SERVICE, { auth: { persistSession: false } })
+
+// linha de base: o banco tem jogadores de verdade, entao a afericao final e
+// por delta. Nenhum script de teste pode encostar em dado real.
+const { count: comDonoAntes } = await admin.from('card_copies')
+  .select('id', { count: 'exact', head: true }).not('owner_id', 'is', null)
 let falhas = 0
 const checar = (n, ok, d) => {
   console.log(`  ${ok ? 'PASS' : 'FALHA'}  ${n}${d ? ' -> ' + d : ''}`); if (!ok) falhas++
@@ -55,6 +60,7 @@ const daCarta = async (uid, offset) => {
   await admin.from('card_copies').update({ owner_id: uid, claimed_at: new Date().toISOString() }).eq('id', id)
   return id
 }
+const clientesIds = NICKS.map((n) => cli[n].id)
 const alvo   = await daCarta(cli.troca1.id, 0)   // a carta disputada
 const doDois = await daCarta(cli.troca2.id, 1)
 const doTres = await daCarta(cli.troca3.id, 2)
@@ -117,15 +123,30 @@ checar('nenhuma proposta ficou pendente',
   sobrando.every((t) => t.status !== 'pending'),
   sobrando.map((t) => t.status).join('/'))
 
-// a carta que NAO foi trocada tem que ter voltado, nada pode ter sumido
-const { count: total } = await admin.from('card_copies')
-  .select('id', { count: 'exact', head: true }).not('owner_id', 'is', null)
-checar('nenhuma copia sumiu nem duplicou', total === 3, `${total} com dono`)
+// nada pode ter sumido nem duplicado. Afericao por DELTA: o banco tem
+// jogadores de verdade jogando ao mesmo tempo, entao numero absoluto nao
+// serve. As 3 cartas do teste continuam sendo 3, e so.
+const { data: dosTestes } = await admin.from('card_copies')
+  .select('id, owner_id').in('id', [alvo, doDois, doTres])
+const idsTeste = new Set(clientesIds)
+checar('as 3 cartas do teste seguem com donos do teste',
+  dosTestes.length === 3 && dosTestes.every((c) => idsTeste.has(c.owner_id)),
+  dosTestes.map((c) => c.owner_id?.slice(0, 4)).join('/'))
 
 // ---------------------------------------------------------------- limpeza
 console.log('\nlimpando...')
-await admin.from('trades').delete().neq('id', 0)
-await admin.from('copy_history').delete().neq('id', 0)
+// LIMPEZA: escopo restrito aos usuarios de teste.
+//
+// A versao anterior fazia delete().neq('id', 0) em copy_history,
+// pack_openings e admin_log - ou seja, GLOBAL. Isso apaga o historico de
+// jogadores de verdade. Script de teste nao pode encostar em dado real.
+for (const nick of NICKS) {
+  const { id } = cli[nick]
+  await admin.from('trades').delete().eq('from_player', id)
+  await admin.from('trades').delete().eq('to_player', id)
+  await admin.from('copy_history').delete().eq('to_player', id)
+  await admin.from('copy_history').delete().eq('from_player', id)
+}
 for (const nick of NICKS) {
   const { id, c } = cli[nick]
   await admin.from('card_copies').update({ owner_id: null, claimed_at: null }).eq('owner_id', id)
@@ -135,7 +156,8 @@ for (const nick of NICKS) {
 }
 const { count: sobrou } = await admin.from('card_copies')
   .select('id', { count: 'exact', head: true }).not('owner_id', 'is', null)
-checar('banco voltou ao estado de lancamento', sobrou === 0, `${sobrou} com dono`)
+checar('o acervo dos jogadores REAIS ficou intacto', sobrou === comDonoAntes,
+  `${comDonoAntes} antes, ${sobrou} depois`)
 
 console.log(`\n${falhas === 0 ? 'TUDO PASSOU' : falhas + ' FALHA(S)'}`)
 process.exit(falhas === 0 ? 0 : 1)

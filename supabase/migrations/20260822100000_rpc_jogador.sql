@@ -96,6 +96,12 @@ exception
 end;
 $$;
 
+-- A coluna vive na sua propria migracao (20260822140000), mas open_pack
+-- referencia ela. Como as migracoes rodam por ordem de nome e esta e mais
+-- antiga, garante aqui tambem. Idempotente nos dois caminhos.
+alter table public.pack_opening_cards
+  add column if not exists garantido boolean not null default false;
+
 -- ================================================================ open_pack
 -- Secao 8 inteira: 3 base + 1 hit, promocao, pacote quente, carta bonus,
 -- pity, regras duras, cascata de esgotamento e ordem embaralhada.
@@ -142,6 +148,7 @@ declare
   v_copias     bigint[] := '{}';
   v_tiers_saiu text[] := '{}';
   v_do_hit     boolean[] := '{}';
+  v_garantidos boolean[] := '{}';
 
   v_abertura   bigint;
   v_ordem      int[];
@@ -331,6 +338,7 @@ begin
     v_copias     := v_copias     || v_copy_id;
     v_tiers_saiu := v_tiers_saiu || v_tier;
     v_do_hit     := v_do_hit     || v_da_tabela;
+    v_garantidos := v_garantidos || v_garantido;
   end loop;
 
   if array_length(v_copias, 1) is null then
@@ -365,9 +373,10 @@ begin
 
   for v_i in 1 .. array_length(v_copias, 1) loop
     insert into public.pack_opening_cards
-      (opening_id, copy_id, slot_index, reveal_index, tier, from_hit_table)
+      (opening_id, copy_id, slot_index, reveal_index, tier, from_hit_table, garantido)
     values
-      (v_abertura, v_copias[v_i], v_i, array_position(v_ordem, v_i), v_tiers_saiu[v_i], v_do_hit[v_i]);
+      (v_abertura, v_copias[v_i], v_i, array_position(v_ordem, v_i),
+       v_tiers_saiu[v_i], v_do_hit[v_i], v_garantidos[v_i]);
   end loop;
 
   -- ---------------------------------------------------------------- resposta
@@ -387,6 +396,7 @@ begin
       'copy_id', cc.id,
       'reveal_index', poc.reveal_index,
       'from_hit_table', poc.from_hit_table,
+      'garantido', poc.garantido,
       'serial_number', cc.serial_number,
       'print_run', ct.print_run,
       'seal', cc.seal,

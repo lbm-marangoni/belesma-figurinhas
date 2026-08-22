@@ -60,6 +60,19 @@ export function Pacote3D({
 
   const arte = `${import.meta.env.BASE_URL}packs/booster-${tipo}.png`
 
+  // Pré-carrega as artes do pacote inteiro assim que ele abre.
+  //
+  // Sem isto, trocar de carta mostrava a ANTERIOR por um instante: o <img>
+  // novo só troca de pixel quando o arquivo termina de baixar, e as artes
+  // têm ~300 KB. A key acima força o remount; o preload garante que o
+  // arquivo já esteja em cache quando o remount acontece.
+  useEffect(() => {
+    for (const c of cartas) {
+      const img = new Image()
+      img.src = `${import.meta.env.BASE_URL}figurinhas/${c.character_slug}/${c.skin}.jpg`
+    }
+  }, [cartas])
+
   // Tilt do pacote: rect da CENA, que não carrega transform (spec §12).
   useEffect(() => {
     const c = cena.current
@@ -186,7 +199,7 @@ export function Pacote3D({
             figurinha só aparece na medida em que é puxada */}
         {etapa === 'puxando' && atual && (
           <div className="janela" style={{ bottom: `${100 - rasgo.y}%` }}>
-            <div className={`carta-puxada ${transicao}`}>
+            <div key={atual.copy_id} className={`carta-puxada ${transicao}`}>
               {/* o pulo fica aqui dentro para não brigar com o transform do arraste */}
               <div className={puxada <= REPOUSO + 0.01 && !transicao ? 'espiando' : ''}>
                 <Figurinha carta={atual} tamanho="media" shader />

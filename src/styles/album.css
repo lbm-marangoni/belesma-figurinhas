@@ -1,127 +1,316 @@
-/* Álbum estilo Panini com virada de página em CSS 3D (spec §11).
+/* Álbum estilo Panini (spec §11), agora com formato de álbum de verdade:
+ * duas páginas abertas e uma folha que gira sobre a LOMBADA.
  *
- * A folha que sai gira sobre a lombada; a próxima já está embaixo, então a
- * virada revela em vez de trocar. Sem biblioteca, sem WebGL.
+ * Referências usadas:
+ *  - estrutura de folha com duas faces, transform-origin na lombada,
+ *    preserve-3d e backface-visibility: cssscript.com/3d-flip-book-animation
+ *  - a ideia que faz a diferença veio do StPageFlip (github.com/Nodlik):
+ *    a SOMBRA tem que acompanhar o ângulo da dobra. Sem isso é só um
+ *    retângulo girando; com isso o olho aceita que é papel.
  */
+
+/* ================================================================ temas
+ * Cada tier é um tema. As variáveis mudam no .spread e todo o resto herda. */
+.tema-comum    { --tinta:#8b9a7b; --papel1:#1d201a; --papel2:#14160f; --luz:#a8bd8e; }
+.tema-incomum  { --tinta:#a8c07a; --papel1:#1c2016; --papel2:#12150e; --luz:#c4dd94; }
+.tema-rara     { --tinta:#6f9ad6; --papel1:#161b24; --papel2:#0e1219; --luz:#8fbaf0; }
+.tema-epica    { --tinta:#a97fd6; --papel1:#1e1826; --papel2:#140f1a; --luz:#c79bf0; }
+.tema-lendaria { --tinta:#d6a25a; --papel1:#231c12; --papel2:#17120b; --luz:#f0c179; }
+.tema-mitica   { --tinta:#e0c04a; --papel1:#241f0f; --papel2:#181409; --luz:#ffe07a; }
+.tema-cosmica  { --tinta:#54b5c9; --papel1:#101f24; --papel2:#0a1418; --luz:#7fdcef; }
+.tema-divina   { --tinta:#dfe8f2; --papel1:#1a1e24; --papel2:#111419; --luz:#ffffff; }
+.tema-infernal { --tinta:#d95f4a; --papel1:#251310; --papel2:#180b09; --luz:#ff8b6e; }
+.tema-aura     { --tinta:#e070b0; --papel1:#251522; --papel2:#180d17; --luz:#ff9ed2; }
+.tema-diamante { --tinta:#7fd8e8; --papel1:#132124; --papel2:#0c1618; --luz:#aef1ff; }
+.tema-prisma   { --tinta:#e8e8e8; --papel1:#1c1a20; --papel2:#121016; --luz:#ffffff; }
+.tema-selados  { --tinta:#c9b072; --papel1:#211d14; --papel2:#16130d; --luz:#e8ce93; }
+
+/* ================================================================ mesa */
+.mesa {
+  /* perspectiva alta de proposito: baixa demais e a folha em pe
+     estoura para fora do livro e parece que saiu do album */
+  perspective: 4200px;
+  perspective-origin: 50% 50%;
+  padding: 0.5rem 0 1rem;
+}
 
 .livro {
   position: relative;
-  perspective: 2400px;
-  perspective-origin: 50% 50%;
-  max-width: 46rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  max-width: 60rem;
   margin-inline: auto;
+  transform-style: preserve-3d;
+  border-radius: 6px;
+  /* a capa por trás das páginas: é ela que dá espessura ao objeto */
+  box-shadow:
+    0 0 0 8px #0d0b09,
+    0 0 0 9px #2a231b,
+    0 26px 50px -12px rgba(0, 0, 0, .85);
 }
 
-.folha {
-  border-radius: 10px;
-  border: 1px solid #2e2a24;
+/* ================================================================ página */
+.pagina {
+  position: relative;
+  min-height: 30rem;
+  padding: 1.5rem 1.4rem;
   background:
-    radial-gradient(ellipse 120% 90% at 50% -10%, #241f18, transparent 70%),
-    linear-gradient(#1b1814, #141210);
-  box-shadow: inset 0 0 60px rgba(0, 0, 0, .55);
-  padding: 1.25rem 1.25rem 1.5rem;
+    radial-gradient(ellipse 90% 60% at 50% 0%, color-mix(in srgb, var(--tinta) 9%, transparent), transparent 70%),
+    repeating-linear-gradient(93deg, rgba(255,255,255,.012) 0 2px, transparent 2px 5px),
+    linear-gradient(var(--papel1), var(--papel2));
+  color: #e8e4dc;
+  overflow: hidden;
 }
+.pagina-esq { border-radius: 4px 0 0 4px; }
+.pagina-dir { border-radius: 0 4px 4px 0; }
 
-/* lombada: a marca de encadernação, à esquerda */
-.folha::before {
+/* a sombra da lombada, mais forte junto ao vinco */
+.pagina-esq::after, .pagina-dir::after {
   content: '';
   position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 14px;
-  border-radius: 10px 0 0 10px;
-  background: linear-gradient(90deg, rgba(0,0,0,.75), rgba(0,0,0,0));
+  top: 0; bottom: 0;
+  width: 56px;
   pointer-events: none;
 }
+.pagina-esq::after { right: 0; background: linear-gradient(90deg, transparent, rgba(0,0,0,.62)); }
+.pagina-dir::after { left: 0;  background: linear-gradient(-90deg, transparent, rgba(0,0,0,.62)); }
 
-.folha-atual {
-  position: relative;
-  z-index: 2;
-  transform-origin: left center;
-  backface-visibility: hidden;
-  will-change: transform;
+/* cabeçalho do tema */
+.tema-titulo {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--tinta) 35%, transparent);
+  padding-bottom: .5rem;
+  margin-bottom: 1rem;
 }
-.folha-proxima {
+.tema-titulo h2 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--luz);
+}
+.tema-titulo span { font-size: .7rem; color: color-mix(in srgb, var(--tinta) 75%, #fff 10%); }
+
+.numero-pagina {
+  position: absolute;
+  bottom: .6rem;
+  font-size: .65rem;
+  letter-spacing: .18em;
+  color: color-mix(in srgb, var(--tinta) 55%, transparent);
+}
+.pagina-esq .numero-pagina { left: 1.4rem; }
+.pagina-dir .numero-pagina { right: 1.4rem; }
+
+/* ================================================================ folha */
+/* A folha cobre a metade direita e gira sobre a lombada (borda esquerda). */
+.folha {
+  position: absolute;
+  top: 0; bottom: 0;
+  left: 50%; right: 0;
+  transform-origin: left center;
+  transform-style: preserve-3d;
+  z-index: 5;
+}
+.folha-face {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  backface-visibility: hidden;
+  overflow: hidden;
+}
+.folha-verso { transform: rotateY(180deg); }
+
+.virando-frente { animation: folha-frente 780ms cubic-bezier(.52,.02,.4,1) forwards; }
+.virando-tras   { animation: folha-tras   780ms cubic-bezier(.52,.02,.4,1) forwards; }
+@keyframes folha-frente { from { transform: rotateY(0deg);    } to { transform: rotateY(-180deg); } }
+@keyframes folha-tras   { from { transform: rotateY(-180deg); } to { transform: rotateY(0deg);    } }
+
+/* A SOMBRA QUE ACOMPANHA A DOBRA — é isto que vende o papel.
+   Escurece até a folha ficar de perfil e clareia de volta. */
+.sombra-dobra {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(0,0,0,.55), rgba(0,0,0,.05) 45%, transparent);
+  opacity: 0;
+}
+.virando-frente .sombra-dobra { animation: dobra 780ms cubic-bezier(.52,.02,.4,1) forwards; }
+.virando-tras   .sombra-dobra { animation: dobra 780ms cubic-bezier(.52,.02,.4,1) forwards; }
+@keyframes dobra {
+  0%   { opacity: 0; }
+  50%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+/* e a página revelada recebe a sombra da folha passando por cima dela */
+.sombra-varrida {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+  background: linear-gradient(90deg, rgba(0,0,0,.72), transparent 55%);
+  transform-origin: left center;
+  animation: varrer 780ms cubic-bezier(.52,.02,.4,1) forwards;
+}
+@keyframes varrer {
+  0%   { opacity: .9; transform: scaleX(1); }
+  100% { opacity: 0;  transform: scaleX(.1); }
 }
 
-/* avançar: a folha atual gira para a esquerda, sobre a lombada */
-.virando-frente {
-  animation: virar-frente 620ms cubic-bezier(.5,.05,.35,1) forwards;
+/* ================================================================ slots */
+.grade-slots {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: .85rem 1rem;
 }
-@keyframes virar-frente {
-  0%   { transform: rotateY(0deg);    filter: brightness(1); }
-  100% { transform: rotateY(-168deg); filter: brightness(.35); }
-}
-
-/* voltar: a folha anterior desdobra de volta por cima */
-.virando-tras {
-  animation: virar-tras 620ms cubic-bezier(.5,.05,.35,1) forwards;
-}
-@keyframes virar-tras {
-  0%   { transform: rotateY(-168deg); filter: brightness(.35); }
-  100% { transform: rotateY(0deg);    filter: brightness(1); }
+.linha-skin {
+  grid-column: 1 / -1;
+  font-size: .6rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--tinta) 70%, transparent);
+  margin-top: .35rem;
 }
 
-/* ---------------------------------------------------------------- slots */
-.slot-vazio {
+.slot {
   position: relative;
   aspect-ratio: 1;
-  border-radius: 8px;
-  border: 1px dashed #3d3730;
+  border-radius: 7px;
+}
+
+/* vazio: silhueta escura com "?" e o contorno pontilhado do adesivo */
+.slot-vazio {
+  border: 1.5px dashed color-mix(in srgb, var(--tinta) 40%, transparent);
   background:
-    radial-gradient(ellipse 70% 55% at 50% 42%, #0e0c0a 40%, transparent 72%),
-    #171412;
+    radial-gradient(ellipse 62% 48% at 50% 44%, rgba(0,0,0,.75) 35%, transparent 72%),
+    color-mix(in srgb, var(--papel2) 88%, #000);
   display: grid;
   place-items: center;
-  color: #4a443c;
-  font-size: 1.6rem;
-  font-weight: 700;
+  color: color-mix(in srgb, var(--tinta) 45%, transparent);
+  font-size: 1.4rem;
+  font-weight: 800;
 }
-/* silhueta escura por trás do "?" */
-.slot-vazio::after {
+/* alvo iluminado enquanto o jogador arrasta a figurinha certa */
+.slot-alvo {
+  border-color: var(--luz);
+  box-shadow: 0 0 0 2px var(--luz), 0 0 22px color-mix(in srgb, var(--luz) 55%, transparent);
+  animation: alvo-pulsa 1s ease-in-out infinite;
+}
+@keyframes alvo-pulsa {
+  0%, 100% { box-shadow: 0 0 0 2px var(--luz), 0 0 16px color-mix(in srgb, var(--luz) 45%, transparent); }
+  50%      { box-shadow: 0 0 0 3px var(--luz), 0 0 30px color-mix(in srgb, var(--luz) 75%, transparent); }
+}
+
+/* colada: papel levemente torto, com sombra de adesivo */
+.slot-colada {
+  filter: drop-shadow(0 3px 5px rgba(0,0,0,.6));
+}
+.slot-colada > * { border-radius: 7px; }
+
+/* a animação de COLAR: desce, achata no papel e dá o repique */
+.colando { animation: colar 620ms cubic-bezier(.3,1.5,.5,1) forwards; }
+@keyframes colar {
+  0%   { transform: scale(1.55) rotate(-7deg) translateY(-22px); opacity: .85; }
+  55%  { transform: scale(.94)  rotate(2.5deg) translateY(0);     opacity: 1; }
+  75%  { transform: scale(1.03) rotate(-1deg); }
+  100% { transform: scale(1)    rotate(0deg); }
+}
+/* o brilho que varre a figurinha no instante em que ela gruda */
+.colando::after {
   content: '';
   position: absolute;
-  inset: 18% 22%;
-  border-radius: 45% 45% 38% 38%;
-  background: #0b0a09;
-  z-index: -1;
+  inset: 0;
+  border-radius: 7px;
+  background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.85) 50%, transparent 70%);
+  background-size: 300% 100%;
+  animation: brilho-cola 620ms ease-out forwards;
+  pointer-events: none;
+}
+@keyframes brilho-cola {
+  from { background-position: 180% 0; opacity: 1; }
+  to   { background-position: -80% 0; opacity: 0; }
 }
 
-/* puxada tem destaque; forjada preenche mas fica marcada (spec §11) */
-.slot-forjada { position: relative; }
-.slot-forjada::after {
-  content: 'FORJADA';
+.marca-forjada {
   position: absolute;
-  left: 50%; bottom: -0.45rem;
+  left: 50%; bottom: -.4rem;
   translate: -50% 0;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .04em;
-  color: #0a0a0a;
-  background: #d1a054;
-  border-radius: 3px;
-  padding: 0 4px;
+  font-size: 8px; font-weight: 800; letter-spacing: .05em;
+  color: #100d08; background: var(--luz);
+  border-radius: 3px; padding: 0 4px;
+  z-index: 2;
 }
-.slot-puxada { box-shadow: 0 0 0 2px rgba(255,255,255,.16), 0 0 16px rgba(255,255,255,.10); border-radius: 8px; }
 
-/* ---------------------------------------------- par de aura, moldura conjunta */
+/* par de aura: moldura conjunta (spec §11) */
 .moldura-aura {
-  position: relative;
-  padding: 10px;
-  border-radius: 14px;
+  padding: 7px;
+  border-radius: 12px;
   background: conic-gradient(from 0deg, #ff2fb3, #ffd166, #4cffb0, #4cc9ff, #b06cff, #ff2fb3);
-  animation: girar-moldura 7s linear infinite;
+  animation: girar-moldura 8s linear infinite;
 }
 @keyframes girar-moldura { to { filter: hue-rotate(360deg); } }
-.moldura-aura > div {
-  border-radius: 8px;
-  background: #0f0d0c;
-  padding: 8px;
+.moldura-aura > div { border-radius: 7px; background: #100c0f; padding: 6px; }
+
+/* ================================================================ deck */
+/* A mão do jogador: as figurinhas que ele tem e ainda não colou nesta
+   página. É de onde se arrasta. */
+.deck {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  margin-top: 1rem;
+  border-top: 1px solid #2a2520;
+  background: linear-gradient(#131110ee, #0b0a09f5);
+  backdrop-filter: blur(6px);
+  padding: .6rem .8rem .8rem;
+}
+.deck-trilho {
+  display: flex;
+  gap: .55rem;
+  overflow-x: auto;
+  padding-bottom: .25rem;
+  scrollbar-width: thin;
+}
+.deck-carta {
+  position: relative;
+  flex: 0 0 4.6rem;
+  cursor: grab;
+  touch-action: none;
+  transition: transform 160ms ease;
+}
+.deck-carta:hover { transform: translateY(-6px); }
+.deck-carta.arrastando { opacity: .25; }
+.deck-badge {
+  position: absolute;
+  top: -5px; right: -5px;
+  background: #f5f5f5; color: #111;
+  font-size: 9px; font-weight: 800;
+  border-radius: 999px; padding: 1px 5px;
+  z-index: 3;
+}
+
+/* o fantasma que segue o dedo */
+.fantasma {
+  position: fixed;
+  width: 5.5rem;
+  pointer-events: none;
+  z-index: 60;
+  translate: -50% -50%;
+  rotate: -6deg;
+  filter: drop-shadow(0 12px 18px rgba(0,0,0,.7));
+}
+
+@media (max-width: 640px) {
+  .livro { grid-template-columns: 1fr; }
+  .folha { display: none; }             /* no celular a virada é troca direta */
+  .pagina-esq::after, .pagina-dir::after { display: none; }
+  .pagina { min-height: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .virando-frente, .virando-tras, .moldura-aura { animation: none !important; }
-  .virando-frente { opacity: 0; }
+  .virando-frente, .virando-tras, .sombra-varrida, .sombra-dobra,
+  .colando, .colando::after, .moldura-aura, .slot-alvo {
+    animation: none !important;
+  }
 }

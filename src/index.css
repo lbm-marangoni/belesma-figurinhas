@@ -1,4 +1,149 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=Archivo+Black&display=swap');
 @import "tailwindcss";
 
-:root { color-scheme: dark; }
-body { @apply bg-neutral-950 text-neutral-100 antialiased; }
+/* BELESMA — base visual.
+ *
+ * A referência é app de TCG: fundo escuro que faz a arte saltar, uma cor de
+ * acento só, tipografia condensada nos títulos e números tabulares em tudo
+ * que é serial. A cor forte vem das figurinhas, não da interface. */
+
+:root {
+  color-scheme: dark;
+
+  --fundo:      #0a0a0b;
+  --fundo-alto: #131315;
+  --borda:      #26262a;
+  --borda-viva: #3a3a41;
+  --texto:      #ececee;
+  --texto-fraco:#8e8e96;
+  --texto-tenue:#5a5a62;
+
+  /* acento: o verde de gosma do Belesma */
+  --acento:     #8fd14f;
+  --acento-esc: #4f7a2a;
+}
+
+* { -webkit-tap-highlight-color: transparent; }
+
+body {
+  background:
+    radial-gradient(ellipse 100% 55% at 50% -8%, #16181a, transparent 70%),
+    var(--fundo);
+  color: var(--texto);
+  font-family: 'Inter Tight', ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: 'tnum' 1, 'cv05' 1;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100dvh;
+}
+
+.marca {
+  font-family: 'Archivo Black', ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+h1, h2, h3 { letter-spacing: -0.015em; }
+
+/* ---------------------------------------------------------------- shell */
+.topo {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .55rem .9rem;
+  background: color-mix(in srgb, var(--fundo) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
+  border-bottom: 1px solid var(--borda);
+}
+
+.aba {
+  position: relative;
+  padding: .4rem .7rem;
+  border-radius: 7px;
+  font-size: .875rem;
+  font-weight: 500;
+  color: var(--texto-fraco);
+  white-space: nowrap;
+  transition: color 140ms ease, background 140ms ease;
+}
+.aba:hover { color: var(--texto); background: #ffffff08; }
+.aba-ativa { color: var(--texto); background: #ffffff10; }
+.aba-ativa::after {
+  content: '';
+  position: absolute;
+  left: .7rem; right: .7rem; bottom: -.56rem;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--acento);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  border: 1px solid var(--borda);
+  border-radius: 999px;
+  padding: .18rem .6rem;
+  font-size: .78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--texto-fraco);
+  background: var(--fundo-alto);
+}
+.chip strong { color: var(--acento); font-weight: 600; }
+
+.selo-novo {
+  display: inline-flex;
+  min-width: 1.05rem;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--acento);
+  color: #0a0a0b;
+  font-size: .65rem;
+  font-weight: 800;
+  padding: 0 .28rem;
+  line-height: 1.05rem;
+}
+
+/* ---------------------------------------------------------------- controles */
+.campo {
+  border: 1px solid var(--borda);
+  background: var(--fundo-alto);
+  color: var(--texto);
+  border-radius: 8px;
+  padding: .4rem .6rem;
+  font-size: .85rem;
+  outline: none;
+  transition: border-color 140ms ease;
+}
+.campo:focus { border-color: var(--borda-viva); }
+
+.btn {
+  border-radius: 8px;
+  padding: .45rem .85rem;
+  font-size: .85rem;
+  font-weight: 600;
+  transition: filter 140ms ease, transform 80ms ease;
+}
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: .35; }
+.btn-forte { background: var(--acento); color: #0a1005; }
+.btn-forte:hover:not(:disabled) { filter: brightness(1.12); }
+.btn-fraco { border: 1px solid var(--borda); color: var(--texto-fraco); }
+.btn-fraco:hover:not(:disabled) { border-color: var(--borda-viva); color: var(--texto); }
+.btn-perigo { background: #a52c22; color: #fff; }
+
+.painel {
+  border: 1px solid var(--borda);
+  background: linear-gradient(var(--fundo-alto), #0f0f11);
+  border-radius: 12px;
+}
+
+.aviso-ok  { border: 1px solid #2c5c33; background: #102313; color: #9fe0a8; }
+.aviso-ruim{ border: 1px solid #6b2a24; background: #23100e; color: #f0a79c; }
+
+/* scrollbar discreta */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2a2a2f; border-radius: 99px; border: 3px solid var(--fundo); }
+::-webkit-scrollbar-thumb:hover { background: #3a3a41; }
