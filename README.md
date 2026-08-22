@@ -134,6 +134,19 @@ A linha do rasgo é **sorteada a cada abertura** — duas nunca rasgam igual. As
 duas metades saem de `clip-path` complementares, então não há fresta entre
 elas.
 
+A revelação é **uma carta por vez, puxada pelo jogador**. A figurinha vai
+aparecendo conforme sai da boca: quem controla o ritmo é a mão, não um timer.
+
+Duas armadilhas de CSS que este arquivo documenta porque custaram caro:
+
+- **`filter` achata `preserve-3d`.** Um `drop-shadow` no `.pacote` fazia a
+  lateral projetar 1,53px a −26° em vez de 9,47px. A sombra vive em
+  `.cena::after`, fora do contexto 3D.
+- **O brilho precisa ser mascarado pela arte.** Os boosters vinham com ~7% de
+  margem transparente; o mylar pintava sobre ela e o pacote parecia estar
+  dentro de um vidro. Os PNGs foram recortados no conteúdo opaco (866×1280) e
+  o mylar usa a própria arte como `mask-image`.
+
 Ordem inegociável: `open_pack` sorteia e grava **antes** de a animação
 começar. Fechar a aba no meio do rasgo não perde figurinha nenhuma; a
 animação é só apresentação. Cada etapa é cancelável com um clique.

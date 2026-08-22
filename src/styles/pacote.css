@@ -1,33 +1,58 @@
 /* Abertura de pacote (spec §13). O pacote é um objeto 3D, não uma imagem
  * balançando: tem plano frontal, plano traseiro e quatro faces laterais.
  *
- * Variáveis escritas pelo JS na cena:
+ * Variáveis escritas pelo JS:
  *   --rx, --ry   rotação do pacote
  *   --px, --py   ponteiro em % (alimenta o especular do mylar)
- *   --queda      progresso da metade de cima caindo, 0 a 1
+ *   --arte       url() do booster, usada como MÁSCARA
+ *   --puxada     progresso da carta sendo puxada, 0 a 1
+ *
+ * NOTA sobre a máscara: os PNGs foram recortados no conteúdo opaco
+ * (866x1280), então a borda do arquivo é a borda do pacote. Mesmo assim o
+ * mylar e o especular são mascarados pela própria arte — sem isso o brilho
+ * pinta um retângulo em volta do pacote e parece que ele está dentro de um
+ * vidro. Foi exatamente o bug da primeira versão.
  */
 
 .cena {
-  perspective: 1200px;
-  perspective-origin: 50% 40%;
+  perspective: 1100px;
+  perspective-origin: 50% 45%;
   position: relative;
-  width: min(300px, 72vw);
-  aspect-ratio: 1000 / 1339;
+  width: min(280px, 66vw);
+  aspect-ratio: 866 / 1280;
   margin-inline: auto;
+}
+
+/* Sombra de contato no chão. Sem ela o pacote flutua e o 3D não convence,
+   por mais correta que a perspectiva esteja. */
+.cena::after {
+  content: '';
+  position: absolute;
+  left: 12%; right: 12%;
+  bottom: -5%;
+  height: 7%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(0,0,0,.72), transparent 72%);
+  filter: blur(5px);
+  z-index: -1;
+  pointer-events: none;
 }
 
 .pacote {
   position: absolute;
   inset: 0;
+  /* NAO por filter aqui: filter cria containing block e ACHATA o
+     transform-style. Medido: com drop-shadow a lateral projetava 1,53px a
+     -26deg; sem ele, 9,47px. A sombra vive em .cena::after, fora do
+     contexto 3D. */
   transform-style: preserve-3d;
   transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
   transition: transform 140ms ease-out;
 }
-/* rotação lenta de idle; o ponteiro sobrepõe quando entra */
 .pacote.idle { animation: girar-idle 9s ease-in-out infinite; }
 @keyframes girar-idle {
-  0%, 100% { transform: rotateX(3deg)  rotateY(-14deg); }
-  50%      { transform: rotateX(-2deg) rotateY(14deg); }
+  0%, 100% { transform: rotateX(2deg)  rotateY(-15deg); }
+  50%      { transform: rotateX(-2deg) rotateY(15deg); }
 }
 
 /* ---------------------------------------------------------------- faces */
@@ -35,59 +60,62 @@
   position: absolute;
   inset: 0;
   backface-visibility: hidden;
-  overflow: hidden;
 }
-.face img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.face img { width: 100%; height: 100%; object-fit: fill; display: block; }
 
-.face-frente { transform: translateZ(7px); }
+.face-frente { transform: translateZ(8px); }
 /* traseira: a mesma arte espelhada e escurecida ~35% (spec §13) */
-.face-verso {
-  transform: translateZ(-7px) rotateY(180deg);
-  filter: brightness(0.65);
+.face-verso  { transform: translateZ(-8px) rotateY(180deg); }
+.face-verso img { transform: scaleX(-1); filter: brightness(0.62) saturate(0.7); }
+
+/* Quatro laterais finas de 12px em degradê prata escuro. Ficam recuadas 2%
+   porque a silhueta do pacote não é um retângulo perfeito — encostadas na
+   borda exata do arquivo, as pontas apareceriam para fora da arte. */
+.lado { position: absolute; }
+.lado-esq, .lado-dir {
+  top: 2%; bottom: 2%; width: 16px;
+  background: linear-gradient(90deg, #17171c, #b9b9c4 38%, #6e6e78 62%, #2b2b32);
+  box-shadow: inset 0 0 8px rgba(0,0,0,.45);
 }
-.face-verso img { transform: scaleX(-1); }
+.lado-topo, .lado-base {
+  left: 3%; right: 3%; height: 16px;
+  background: linear-gradient(180deg, #17171c, #b9b9c4 38%, #6e6e78 62%, #2b2b32);
+  box-shadow: inset 0 0 8px rgba(0,0,0,.45);
+}
+.lado-esq  { left: 0;    transform: rotateY(-90deg); transform-origin: left center; }
+.lado-dir  { right: 0;   transform: rotateY(90deg);  transform-origin: right center; }
+.lado-topo { top: 0;     transform: rotateX(90deg);  transform-origin: center top; }
+.lado-base { bottom: 0;  transform: rotateX(-90deg); transform-origin: center bottom; }
 
-/* quatro laterais finas de ~14px em degradê prata escuro */
-.lado { position: absolute; background: linear-gradient(90deg, #2a2a2e, #8b8b93 45%, #43434a); }
-.lado-esq  { left: 0;  top: 0; bottom: 0; width: 14px;
-             transform: rotateY(-90deg); transform-origin: left center; }
-.lado-dir  { right: 0; top: 0; bottom: 0; width: 14px;
-             transform: rotateY(90deg);  transform-origin: right center; }
-.lado-topo { top: 0;    left: 0; right: 0; height: 14px;
-             background: linear-gradient(180deg, #2a2a2e, #8b8b93 45%, #43434a);
-             transform: rotateX(90deg);  transform-origin: center top; }
-.lado-base { bottom: 0; left: 0; right: 0; height: 14px;
-             background: linear-gradient(180deg, #43434a, #8b8b93 55%, #2a2a2e);
-             transform: rotateX(-90deg); transform-origin: center bottom; }
-
-/* ---------------------------------------------------------------- mylar
- * Brilho especular que corre com o ângulo, mais amassado animado. */
+/* ---------------------------------------------------------------- mylar */
 .mylar {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  border-radius: inherit;
   background-image:
     linear-gradient(100deg,
-      transparent 32%,
-      rgba(255,255,255,0.10) 44%,
-      rgba(255,255,255,0.55) 50%,
-      rgba(255,255,255,0.10) 56%,
-      transparent 68%),
-    repeating-linear-gradient(62deg,
-      rgba(255,255,255,0.05) 0 2px, transparent 2px 9px),
-    repeating-linear-gradient(-37deg,
-      rgba(0,0,0,0.06) 0 1px, transparent 1px 13px);
+      transparent 34%,
+      rgba(255,255,255,0.08) 44%,
+      rgba(255,255,255,0.42) 50%,
+      rgba(255,255,255,0.08) 56%,
+      transparent 66%),
+    repeating-linear-gradient(62deg, rgba(255,255,255,0.045) 0 2px, transparent 2px 10px),
+    repeating-linear-gradient(-37deg, rgba(0,0,0,0.05) 0 1px, transparent 1px 14px);
   background-size: 250% 250%, 100% 100%, 100% 100%;
   background-position: calc(100% - var(--px, 50%) * 2) center, 0 0, 0 0;
   mix-blend-mode: overlay;
+  /* recortado pela silhueta do pacote: nada de brilho fora da arte */
+  -webkit-mask-image: var(--arte);
+  mask-image: var(--arte);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
   animation: amassar 5s ease-in-out infinite;
 }
 @keyframes amassar {
-  0%, 100% { background-position-y: 0%,   0, 0; filter: contrast(1); }
-  50%      { background-position-y: 12%,  0, 0; filter: contrast(1.25); }
+  0%, 100% { background-position-y: 0%,  0, 0; filter: contrast(1); }
+  50%      { background-position-y: 12%, 0, 0; filter: contrast(1.22); }
 }
-.tremendo .mylar { animation: amassar 0.7s ease-in-out infinite; filter: brightness(1.5); }
+.tremendo .mylar { animation-duration: 0.7s; filter: brightness(1.4); }
 
 /* ---------------------------------------------------------------- tremor */
 .tremendo { animation: tremor 0.32s linear infinite; }
@@ -100,25 +128,21 @@
 }
 
 /* pacote quente: abre diferente desde o começo, sem revelar o conteúdo */
-.quente .face-frente { filter: saturate(1.3); }
-.quente::after {
-  content: '';
+.brilho-quente {
   position: absolute;
-  inset: -12%;
+  inset: -14%;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(255,130,30,0.45), transparent 62%);
+  background: radial-gradient(circle, rgba(255,130,30,0.5), transparent 62%);
   animation: pulsar-quente 1.1s ease-in-out infinite;
   pointer-events: none;
-  z-index: -1;
+  z-index: 0;
 }
 @keyframes pulsar-quente {
-  0%, 100% { opacity: 0.45; transform: scale(0.94); }
-  50%      { opacity: 0.95; transform: scale(1.06); }
+  0%, 100% { opacity: 0.4; transform: scale(0.92); }
+  50%      { opacity: 0.95; transform: scale(1.08); }
 }
 
-/* ---------------------------------------------------------------- rasgo
- * A linha é irregular e vem por clip-path do JS (--corte-cima/--corte-baixo).
- * A metade de cima descola, rotaciona em X e cai com gravidade. */
+/* ---------------------------------------------------------------- rasgo */
 .metade { position: absolute; inset: 0; transform-style: preserve-3d; }
 
 .metade-cima {
@@ -135,18 +159,18 @@
 
 .metade-baixo { clip-path: var(--corte-baixo); z-index: 3; }
 
-/* a boca abre e o interior escurece */
 .boca {
   position: absolute;
   inset: 0;
   clip-path: var(--corte-baixo);
-  background: linear-gradient(180deg, rgba(0,0,0,0.92) 0 6%, rgba(0,0,0,0.35) 14%, transparent 26%);
+  background: linear-gradient(180deg, rgba(0,0,0,0.94) 0 5%, rgba(0,0,0,0.4) 13%, transparent 24%);
+  -webkit-mask-image: var(--arte);
+  mask-image: var(--arte);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
   z-index: 3;
   pointer-events: none;
-  opacity: 0;
-  animation: abrir-boca .5s .18s ease-out forwards;
 }
-@keyframes abrir-boca { to { opacity: 1; } }
 
 /* ---------------------------------------------------------------- foil */
 .foil {
@@ -162,36 +186,68 @@
   100% { transform: translate(var(--dx), var(--dy)) rotate(var(--giro)) scale(0.4); opacity: 0; }
 }
 
-/* ---------------------------------------------------------------- saída
- * As cartas emergem da metade inferior. O recorte vem do wrapper com
- * overflow:hidden terminando na linha da boca — assim a carta some atrás da
- * borda frontal sem precisar de clip-path móvel. */
+/* ================================================================ puxar
+ * Uma carta por vez, arrastada para fora pelo jogador.
+ *
+ * A janela tem overflow:hidden e termina EXATAMENTE na linha da boca; ela se
+ * estende bem acima do pacote para caber a figurinha inteira. A carta fica
+ * ancorada no rodapé da janela: em --puxada 0 está translateY(100%), toda
+ * abaixo da boca e portanto invisível; em 1 está inteira para fora.
+ *
+ * Isso é o que faz a revelação acontecer CONFORME se puxa, sem clip-path
+ * recalculado a cada frame. */
 .janela {
   position: absolute;
-  left: 0; right: 0; top: 0;
+  left: -14%;
+  right: -14%;
+  top: -78%;
   overflow: hidden;
   z-index: 2;                 /* atrás da metade de baixo (z 3) */
   pointer-events: none;
 }
-.subindo {
+.carta-puxada {
   position: absolute;
   left: 50%;
-  width: 78%;
-  translate: -50% 0;
-  animation: subir 720ms cubic-bezier(.2,.7,.25,1) forwards;
+  bottom: 0;
+  width: 62%;
+  margin-left: -31%;
+  transform: translateY(calc((1 - var(--puxada, 0)) * 100%));
+  will-change: transform;
 }
-@keyframes subir {
-  0%   { transform: translateY(115%) scale(0.9); }
-  100% { transform: translateY(2%)   scale(1); }
+.carta-puxada.assentando { transition: transform 320ms cubic-bezier(.2,.8,.25,1); }
+.carta-puxada.saindo     { transition: transform 260ms ease-in; }
+
+/* pega para arrastar: fica sobre a boca, é o que recebe o ponteiro */
+.pega {
+  position: absolute;
+  left: 8%; right: 8%;
+  height: 34%;
+  z-index: 6;
+  cursor: grab;
+  touch-action: none;
+}
+.pega:active { cursor: grabbing; }
+
+.dica-puxar {
+  position: absolute;
+  left: 0; right: 0;
+  text-align: center;
+  font-size: 11px;
+  color: #a3a3a3;
+  pointer-events: none;
+  animation: acenar 1.6s ease-in-out infinite;
+}
+@keyframes acenar {
+  0%, 100% { opacity: .55; transform: translateY(0); }
+  50%      { opacity: 1;   transform: translateY(-5px); }
 }
 
 /* ---------------------------------------------------------------- reduzido */
 @media (prefers-reduced-motion: reduce) {
-  .pacote.idle, .tremendo, .mylar, .quente::after,
-  .metade-cima, .boca, .foil, .subindo {
+  .pacote.idle, .tremendo, .mylar, .brilho-quente,
+  .metade-cima, .foil, .dica-puxar {
     animation: none !important;
   }
   .pacote { transition: none !important; }
   .metade-cima { opacity: 0; }
-  .subindo { transform: translateY(2%); }
 }
