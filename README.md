@@ -1,7 +1,7 @@
 # BELESMA — figurinhas
 
 Implementação de `BELESMA-BUILD.md` (a spec mestre, na pasta acima).
-**Estado: Fase 1 (fundação) concluída.** Fase 2 em diante não começou.
+**Estado: Fases 1 e 2 concluídas.** Fase 3 em diante não começou.
 
 Este projeto é novo e separado de `../belesma/`, que é a implementação da spec
 antiga (`BELESMA-SPEC.md`, modelo de cartas com `rarity`). Aquele projeto não
@@ -20,8 +20,11 @@ supabase/migrations/
 scripts/
   verificar-fase1.mjs         roda as migrações num Postgres real (PGlite) e
                               confere contagens, selos, RLS e idempotência
+  verificar-fase2.mjs         450 pacotes: distribuição, pity, reserva, authz
   fraude-http.mjs             o mesmo teste de fraude, mas contra o Supabase
                               real, por HTTP e com JWT do Auth
+  fluxo-http.mjs              cadastro -> abrir -> coleção -> admin, por HTTP
+  concorrencia-http.mjs       72 pacotes em paralelo: nenhum serial repetido
   check-assets.mjs            confere as artes contra o catálogo (spec §3)
   importar-assets.mjs         traz as artes de "../belesma new", renomeia para
                               o padrão e reconstrói o alfa dos selos
@@ -30,8 +33,11 @@ scripts/
 ## Rodar as verificações
 
 ```
-npm run verificar:fase1     # Postgres local (PGlite), sem Docker
-node scripts/fraude-http.mjs  # contra o Supabase de verdade, por HTTP
+npm run verificar:fase1       # Postgres local (PGlite), sem Docker
+npm run verificar:fase2       # idem, com 450 pacotes abertos
+node scripts/fraude-http.mjs      # contra o Supabase real, por HTTP
+node scripts/fluxo-http.mjs       # fluxo do usuário de ponta a ponta
+node scripts/concorrencia-http.mjs # 72 pacotes simultâneos
 ```
 
 O primeiro sobe um Postgres em WASM e aplica **as mesmas migrações** que vão
@@ -81,3 +87,20 @@ permitida.
 `npm run check-assets` — hoje acusa as 81 figurinhas, os 3 selos e os 3
 boosters faltando. É o esperado: as artes chegam aos poucos e o sistema tem
 que funcionar com placeholder (spec §3).
+
+## Rotas
+
+| rota | quem vê |
+|---|---|
+| `/colecao` | logado |
+| `/abrir` | logado |
+| `/admin` | só `is_admin` — para os outros, 404 |
+
+O `dist/404.html` é cópia do `index.html`: é o que faz link direto para
+`/admin` funcionar no GitHub Pages, que não conhece rotas de SPA.
+
+## Configuração do Auth
+
+O e-mail é sintético (`apelido@belesma.local`), então **a confirmação de
+e-mail precisa ficar desligada** (`mailer_autoconfirm: true`) e o mínimo de
+senha é 6. Já está assim no projeto.

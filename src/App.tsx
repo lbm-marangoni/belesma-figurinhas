@@ -1,74 +1,67 @@
-import { useEffect, useState } from 'react'
-import { supabase } from './lib/supabase'
-
-// Fase 1 nao tem interface. Esta tela existe so para provar a fiacao:
-// se ela mostra os numeros do set lendo pela anon key, entao o schema subiu,
-// o seed rodou e as policies de leitura publica estao certas.
-// A Fase 2 substitui isto por login e colecao.
-
-type Contagem = { personagens: number; tipos: number; copias: number; selos: number }
+import { BrowserRouter, Link, NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { ProvedorSessao, useSessao } from './lib/sessao'
+import Login from './paginas/Login'
+import Colecao from './paginas/Colecao'
+import Abrir from './paginas/Abrir'
+import Admin from './paginas/Admin'
 
 export default function App() {
-  const [dados, setDados] = useState<Contagem | null>(null)
-  const [erro, setErro] = useState<string | null>(null)
+  return (
+    <ProvedorSessao>
+      <BrowserRouter basename={import.meta.env.BASE_URL}>
+        <Rotas />
+      </BrowserRouter>
+    </ProvedorSessao>
+  )
+}
 
-  useEffect(() => {
-    ;(async () => {
-      const conta = async (tabela: string, filtro?: (q: any) => any) => {
-        let q = supabase.from(tabela).select('*', { count: 'exact', head: true })
-        if (filtro) q = filtro(q)
-        const { count, error } = await q
-        if (error) throw error
-        return count ?? 0
-      }
-      try {
-        setDados({
-          personagens: await conta('characters'),
-          tipos: await conta('card_types'),
-          copias: await conta('card_copies'),
-          selos: await conta('card_copies', (q) => q.neq('seal', 'none')),
-        })
-      } catch (e) {
-        setErro(e instanceof Error ? e.message : String(e))
-      }
-    })()
-  }, [])
+function Rotas() {
+  const { sessao, jogador, carregando } = useSessao()
+
+  if (carregando) {
+    return <main className="grid min-h-dvh place-items-center text-neutral-600">…</main>
+  }
+  if (!sessao || !jogador) return <Login />
 
   return (
-    <main className="min-h-dvh grid place-items-center p-8">
-      <div className="w-full max-w-md">
-        <h1 className="text-2xl font-semibold tracking-tight">BELESMA</h1>
-        <p className="mt-1 text-sm text-neutral-400">Fase 1 — fundação</p>
+    <div className="min-h-dvh">
+      <Shell />
+      <Routes>
+        <Route path="/" element={<Navigate to="/colecao" replace />} />
+        <Route path="/colecao" element={<Colecao />} />
+        <Route path="/abrir" element={<Abrir />} />
+        <Route path="/admin" element={<Admin />} />
+        <Route path="*" element={<Navigate to="/colecao" replace />} />
+      </Routes>
+    </div>
+  )
+}
 
-        {erro && (
-          <p className="mt-6 rounded border border-red-900 bg-red-950/50 p-3 text-sm text-red-300">
-            {erro}
-          </p>
-        )}
+function Shell() {
+  const { jogador, sair } = useSessao()
+  if (!jogador) return null
 
-        {dados && (
-          <dl className="mt-6 divide-y divide-neutral-800 border-y border-neutral-800 text-sm">
-            {[
-              ['Personagens', dados.personagens, 3],
-              ['Tipos', dados.tipos, 81],
-              ['Cópias', dados.copias, 6642],
-              ['Selos', dados.selos, 51],
-            ].map(([rotulo, valor, esperado]) => (
-              <div key={String(rotulo)} className="flex justify-between py-2">
-                <dt className="text-neutral-400">{rotulo}</dt>
-                <dd className={valor === esperado ? 'text-neutral-100' : 'text-amber-400'}>
-                  {valor}
-                  {valor !== esperado && (
-                    <span className="text-neutral-500"> / esperado {esperado}</span>
-                  )}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        )}
+  const pacotes = jogador.packs_common + jogador.packs_rare + jogador.packs_ultra +
+    jogador.packs_common_daily + jogador.packs_rare_daily + jogador.packs_ultra_daily
 
-        {!dados && !erro && <p className="mt-6 text-sm text-neutral-500">carregando…</p>}
+  const aba = ({ isActive }: { isActive: boolean }) =>
+    `px-3 py-2 text-sm ${isActive ? 'text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`
+
+  return (
+    <header className="flex flex-wrap items-center gap-1 border-b border-neutral-800 px-4 py-2">
+      <Link to="/colecao" className="mr-3 font-semibold tracking-tight">BELESMA</Link>
+      <NavLink to="/colecao" className={aba}>Coleção</NavLink>
+      <NavLink to="/abrir" className={aba}>
+        Abrir {pacotes > 0 && <span className="text-emerald-400">({pacotes})</span>}
+      </NavLink>
+      {jogador.is_admin && <NavLink to="/admin" className={aba}>Admin</NavLink>}
+
+      <div className="ml-auto flex items-center gap-3 text-sm">
+        {/* Saldo sempre visível (spec §19.8). A moeda entra na Fase 6. */}
+        <span className="text-neutral-400">{jogador.baba} baba</span>
+        <span className="text-neutral-300">{jogador.nickname}</span>
+        <button onClick={sair} className="text-neutral-500 underline underline-offset-4">sair</button>
       </div>
-    </main>
+    </header>
   )
 }

@@ -1,0 +1,153 @@
+// Fluxo completo da Fase 2 pelo caminho do usuario: cadastro com apelido e
+// senha, abertura de pacote, leitura da colecao. Tudo pela anon key, por HTTP,
+// contra o Supabase de verdade - do jeito que o navegador faz.
+//
+//   SUPABASE_SERVICE_ROLE_KEY=... node scripts/fluxo-http.mjs
+//
+// A service key so e usada na limpeza no fim.
+
+import { createClient } from '@supabase/supabase-js'
+import { readFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const raiz = join(dirname(fileURLToPath(import.meta.url)), '..')
+const env = Object.fromEntries(
+  readFileSync(join(raiz, '.env.local'), 'utf8')
+    .split('\n').filter((l) => l.includes('=') && !l.trim().startsWith('#'))
+    .map((l) => [l.slice(0, l.indexOf('=')).trim(), l.slice(l.indexOf('=') + 1).trim()]),
+)
+const URL = env.VITE_SUPABASE_URL, ANON = env.VITE_SUPABASE_ANON_KEY
+const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY
+if (!SERVICE) { console.error('falta SUPABASE_SERVICE_ROLE_KEY'); process.exit(2) }
+
+const admin = createClient(URL, SERVICE, { auth: { persistSession: false } })
+let falhas = 0
+const checar = (n, ok, d) => {
+  console.log(`  ${ok ? 'PASS' : 'FALHA'}  ${n}${d ? ' -> ' + d : ''}`); if (!ok) falhas++
+}
+
+const NICK = 'fluxo1', SENHA = 'fluxo-123456'
+const EMAIL = `${NICK}@belesma.local`
+
+// limpa resto de execucao anterior
+{
+  const { data } = await admin.auth.admin.listUsers({ perPage: 200 })
+  const v = data?.users?.find((u) => u.email === EMAIL)
+  if (v) { await admin.from('players').delete().eq('id', v.id); await admin.auth.admin.deleteUser(v.id) }
+}
+
+const c = createClient(URL, ANON, { auth: { persistSession: false } })
+
+// ================================================================ cadastro
+console.log('\n== cadastro com apelido + senha (secao 10) ==')
+const { data: livre } = await c.rpc('nickname_disponivel', { p_nickname: NICK })
+checar('nickname_disponivel responde para anon', livre === true, String(livre))
+
+const { error: eUp } = await c.auth.signUp({ email: EMAIL, password: SENHA })
+checar('signUp com e-mail sintetico .local aceito', !eUp, eUp?.message)
+if (eUp) { console.log('\nFALHA CRITICA: o Auth rejeita o dominio sintetico.'); process.exit(1) }
+
+const { data: pl, error: eNick } = await c.rpc('claim_nickname', { p_nickname: NICK })
+checar('claim_nickname cria o jogador', !eNick, eNick?.message)
+checar('allotment inicial 12/5/2',
+  pl?.packs_common === 12 && pl?.packs_rare === 5 && pl?.packs_ultra === 2,
+  `${pl?.packs_common}/${pl?.packs_rare}/${pl?.packs_ultra}`)
+checar('nao nasce admin', pl?.is_admin === false)
+
+const { data: dep } = await c.rpc('nickname_disponivel', { p_nickname: NICK })
+checar('apelido fica travado depois', dep === false)
+
+// login de novo, como quem volta ao site
+await c.auth.signOut()
+const { error: eIn } = await c.auth.signInWithPassword({ email: EMAIL, password: SENHA })
+checar('login volta a funcionar', !eIn, eIn?.message)
+
+// ================================================================ abrir
+console.log('\n== abrir pacote ==')
+const { data: r, error: eOpen } = await c.rpc('open_pack', { pack_type: 'comum' })
+checar('open_pack responde', !eOpen, eOpen?.message)
+checar('4 ou 5 cartas', r?.cartas?.length === 4 || r?.cartas?.length === 5, `${r?.cartas?.length}`)
+checar('toda carta traz art_path e serial',
+  r.cartas.every((x) => x.art_path && x.serial_number > 0 && x.print_run > 0))
+checar('reveal_index veio embaralhado do servidor',
+  new Set(r.cartas.map((x) => x.reveal_index)).size === r.cartas.length)
+checar('a primeira abertura marca estreia mundial',
+  r.cartas.some((x) => x.estreia_mundial === true))
+
+const { data: me1 } = await c.rpc('me')
+checar('consumiu um pacote comum', me1.packs_common === 11, `${me1.packs_common}`)
+
+// sem pacote suficiente, falha limpo
+for (let i = 0; i < 11; i++) await c.rpc('open_pack', { pack_type: 'comum' })
+const { error: eSem } = await c.rpc('open_pack', { pack_type: 'comum' })
+checar('sem pacote, erro claro', !!eSem && /sem pacote/.test(eSem.message), eSem?.message)
+
+// ================================================================ colecao
+console.log('\n== colecao ==')
+const { data: acervo, error: eCol } = await c
+  .from('card_copies')
+  .select(`copy_id:id, serial_number, seal, origin,
+           card_types!inner ( print_run, tier, skin, characters!inner ( slug, name ) )`)
+  .eq('owner_id', pl.id)
+checar('le o proprio acervo pela anon key', !eCol, eCol?.message)
+checar('acervo tem as cartas abertas', (acervo?.length ?? 0) >= 40, `${acervo?.length} copias`)
+
+const { count: total } = await c.from('card_copies').select('id', { count: 'exact', head: true })
+checar('indice global continua publico', total === 6642, `${total}`)
+
+// ================================================================ admin
+console.log('\n== /admin so para admin ==')
+for (const [nome, chamada] of [
+  ['admin_jogadores', c.rpc('admin_jogadores')],
+  ['admin_stock_report', c.rpc('admin_stock_report')],
+  ['grant_packs', c.rpc('grant_packs', { p_target: 'todos', p_pack_type: 'ultra', p_quantidade: 99 })],
+  ['seed_edition', c.rpc('seed_edition', { p_params: { slug: 'invasor' } })],
+  ['admin_reset_all_collections', c.rpc('admin_reset_all_collections', { p_confirmacao: 'RESETAR' })],
+]) {
+  const { error } = await chamada
+  checar(`jogador comum: ${nome} negado`, !!error, error?.message?.slice(0, 40))
+}
+
+await admin.from('players').update({ is_admin: true }).eq('id', pl.id)
+const { data: meAdmin } = await c.rpc('me')
+checar('me() ja reflete is_admin', meAdmin.is_admin === true)
+const { data: js, error: eJs } = await c.rpc('admin_jogadores')
+checar('admin: admin_jogadores funciona', !eJs && Array.isArray(js), eJs?.message)
+const { data: est } = await c.rpc('admin_stock_report')
+checar('admin: estoque bate com o seed',
+  est.selos.emitidos === 51 && est.selos.branco === 36, `${est.selos.emitidos} selos`)
+const { error: eOdds } = await c.rpc('admin_set_pack_config', {
+  p_rows: [{ pack_type: 'comum', slot: 'hit', tier: 'rara', weight: 50 }],
+})
+checar('admin: odds que nao somam 100 sao recusadas', !!eOdds, eOdds?.message?.slice(0, 45))
+const { data: somaOdds } = await c.from('pack_config').select('weight')
+  .eq('pack_type', 'comum').eq('slot', 'hit')
+checar('as odds recusadas nao ficaram gravadas',
+  somaOdds.reduce((a, x) => a + Number(x.weight), 0) === 100)
+
+const { data: seco } = await c.rpc('seed_edition_dry_run', { p_params: { slug: 'zezao' } })
+checar('dry-run preve 27 tipos e 2214 copias',
+  Number(seco.card_types) === 27 && Number(seco.card_copies) === 2214)
+const { count: chars } = await c.from('characters').select('id', { count: 'exact', head: true })
+checar('dry-run nao escreveu nada', chars === 3, `${chars} personagens`)
+
+const { data: logs } = await c.from('admin_log').select('*')
+checar('admin le o admin_log', Array.isArray(logs), `${logs?.length} linhas`)
+
+// ================================================================ limpeza
+console.log('\nlimpando...')
+await c.rpc('admin_reset_player_collection', { p_nickname: NICK })
+await admin.from('pack_opening_cards').delete().neq('id', 0)
+await admin.from('pack_openings').delete().neq('id', 0)
+await admin.from('copy_history').delete().neq('id', 0)
+await admin.from('admin_log').delete().neq('id', 0)
+await c.auth.signOut()
+await admin.from('players').delete().eq('id', pl.id)
+await admin.auth.admin.deleteUser(pl.id)
+const { count: sobrou } = await admin.from('card_copies')
+  .select('id', { count: 'exact', head: true }).not('owner_id', 'is', null)
+checar('banco voltou ao estado de lancamento', sobrou === 0, `${sobrou} com dono`)
+
+console.log(`\n${falhas === 0 ? 'TUDO PASSOU' : falhas + ' FALHA(S)'}`)
+process.exit(falhas === 0 ? 0 : 1)
