@@ -16,6 +16,7 @@
     "verificar:fase2": "node scripts/verificar-fase2.mjs",
     "verificar:fase5": "node scripts/verificar-fase5.mjs",
     "verificar:fase6": "node scripts/verificar-fase6.mjs",
+    "verificar:odds": "node scripts/verificar-odds.mjs 1200",
     "verificar:fase7": "node scripts/verificar-fase7.mjs"
   },
   "dependencies": {

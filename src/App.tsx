@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Link, NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { supabase } from './lib/supabase'
 import { ProvedorSessao, useSessao } from './lib/sessao'
 import Login from './paginas/Login'
@@ -13,6 +13,7 @@ import Conquistas from './paginas/Conquistas'
 import Forja from './paginas/Forja'
 import Loja from './paginas/Loja'
 import Verificar from './paginas/Verificar'
+import './styles/navegacao.css'
 
 export default function App() {
   return (
@@ -61,9 +62,39 @@ function Rotas() {
   )
 }
 
+/* ---------------------------------------------------------------- ícones
+ * SVG inline de 24px, traço único. Sem biblioteca: são cinco desenhos e
+ * qualquer pacote de ícones custaria mais que o arquivo inteiro. */
+const Icone = ({ d }: { d: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
+       strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d={d} />
+  </svg>
+)
+const ICONES = {
+  colecao: 'M4 5h6v6H4zM14 5h6v6h-6zM4 13h6v6H4zM14 13h6v6h-6z',
+  album:   'M4 5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2zM9 3v18',
+  abrir:   'M3 8h18v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1zM3 8l2-4h14l2 4M12 4v17',
+  trocas:  'M4 8h13l-3-3M20 16H7l3 3',
+  mais:    'M5 12h.01M12 12h.01M19 12h.01',
+}
+
 function Shell() {
   const { jogador, sair } = useSessao()
   const [pendentes, setPendentes] = useState(0)
+  const [mais, setMais] = useState(false)
+  const local = useLocation()
+
+  // trocar de página fecha a folha; sem isto ela ficava aberta por cima do
+  // destino recém-aberto
+  useEffect(() => { setMais(false) }, [local.pathname])
+
+  useEffect(() => {
+    if (!mais) return
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setMais(false) }
+    window.addEventListener('keydown', esc)
+    return () => window.removeEventListener('keydown', esc)
+  }, [mais])
 
   // contador de propostas recebidas, atualizado por realtime
   useEffect(() => {
@@ -88,7 +119,18 @@ function Shell() {
 
   const aba = ({ isActive }: { isActive: boolean }) => `aba ${isActive ? 'aba-ativa' : ''}`
 
+  const baixo = ({ isActive }: { isActive: boolean }) =>
+    `item-baixo ${isActive ? 'item-baixo-ativo' : ''}`
+
+  // as secundárias vivem na folha "mais"; no desktop elas continuam no topo
+  const secundarias: [string, string][] = [
+    ['/forja', 'Forja'], ['/loja', 'Loja'], ['/conquistas', 'Conquistas'],
+    ['/perfil', jogador.nickname],
+    ...(jogador.is_admin ? ([['/admin', 'Admin']] as [string, string][]) : []),
+  ]
+
   return (
+    <>
     <header className="topo">
       <Link to="/colecao" className="marca mr-2 text-lg">
         BELESMA
@@ -110,11 +152,62 @@ function Shell() {
       </nav>
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
-        {/* Saldo sempre visível (spec §19.8). A moeda entra na Fase 6. */}
+        {/* Saldo sempre visível (spec §19.8) — inclusive no celular, onde as
+            abas somem mas o chip continua no topo. */}
         <Link to="/loja" className="chip"><strong>{jogador.baba}</strong> baba</Link>
-        <Link to="/perfil" className="aba">{jogador.nickname}</Link>
-        <button onClick={sair} className="aba" title="sair">sair</button>
+        <Link to="/perfil" className="aba so-desktop">{jogador.nickname}</Link>
+        <button onClick={sair} className="aba so-desktop" title="sair">sair</button>
       </div>
     </header>
+
+    {/* =========================================================== celular
+     * Oito abas numa fileira que rola de lado é um menu que ninguém lê: o
+     * que está fora da tela não existe, e no topo nada disso alcança o
+     * polegar. No celular as quatro rotas de uso diário viram barra
+     * inferior, e o resto mora numa folha. */}
+    <nav className="barra-baixo" aria-label="navegação principal">
+      <NavLink to="/colecao" className={baixo}>
+        <Icone d={ICONES.colecao} /><span>Coleção</span>
+      </NavLink>
+      <NavLink to="/album" className={baixo}>
+        <Icone d={ICONES.album} /><span>Álbum</span>
+      </NavLink>
+      <NavLink to="/abrir" className={baixo}>
+        <Icone d={ICONES.abrir} /><span>Abrir</span>
+        {pacotes > 0 && <i className="ponto-baixo">{pacotes}</i>}
+      </NavLink>
+      <NavLink to="/trocas" className={baixo}>
+        <Icone d={ICONES.trocas} /><span>Trocas</span>
+        {pendentes > 0 && <i className="ponto-baixo">{pendentes}</i>}
+      </NavLink>
+      <button type="button" onClick={() => setMais(true)}
+        className={`item-baixo ${mais ? 'item-baixo-ativo' : ''}`}
+        aria-haspopup="dialog" aria-expanded={mais}>
+        <Icone d={ICONES.mais} /><span>Mais</span>
+      </button>
+    </nav>
+
+    {mais && (
+      <div className="folha-fundo" onClick={() => setMais(false)}>
+        <div className="folha" role="dialog" aria-label="mais opções"
+             onClick={(e) => e.stopPropagation()}>
+          <span className="folha-pega" />
+          <div className="folha-topo">
+            <strong>{jogador.nickname}</strong>
+            <span className="chip"><strong>{jogador.baba}</strong> baba</span>
+          </div>
+          <div className="folha-grade">
+            {secundarias.map(([para, rotulo]) => (
+              <NavLink key={para} to={para}
+                className={({ isActive }) => `folha-item ${isActive ? 'folha-item-ativo' : ''}`}>
+                {rotulo}
+              </NavLink>
+            ))}
+          </div>
+          <button onClick={sair} className="folha-sair">sair da conta</button>
+        </div>
+      </div>
+    )}
+    </>
   )
 }

@@ -281,3 +281,152 @@
   .pacote { transition: none !important; }
   .metade-cima { opacity: 0; }
 }
+
+/* ================================================================ auras
+ * O que a carta ganha ao emergir, por que ela é o que é.
+ *
+ * Tudo aqui é gradiente e transform. NENHUM `filter`: a .cena carrega
+ * preserve-3d e filter achata o subárvore inteira — foi assim que as laterais
+ * do pacote projetavam 1.53px em vez de 9.47px (spec §12).
+ *
+ * As camadas vivem dentro de .carta-puxada, que está dentro da .janela com
+ * overflow:hidden. Isso é de propósito: o brilho SOBE junto com a carta em
+ * vez de aparecer inteiro antes dela.
+ */
+.carta-puxada { --aura: transparent; }
+.carta-puxada > .conteudo { position: relative; z-index: 2; }
+
+.halo {
+  position: absolute;
+  inset: -20% -24%;
+  z-index: 0;
+  border-radius: 26%;
+  background: radial-gradient(closest-side, var(--aura), transparent 74%);
+  opacity: 0;
+  pointer-events: none;
+  animation: aura-respirar 1.5s ease-in-out infinite;
+}
+@keyframes aura-respirar {
+  0%, 100% { opacity: .45; transform: scale(.94); }
+  50%      { opacity: .95; transform: scale(1.06); }
+}
+.aura-base .halo { display: none; }
+.aura-hit  .halo { animation-duration: 2.2s; }
+
+/* raios girando: só para o que é raro de verdade, senão vira poluição */
+.raios {
+  position: absolute;
+  inset: -34%;
+  z-index: 1;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: .5;
+  background: conic-gradient(from 0deg,
+    var(--aura) 0deg 3deg, transparent 3deg 30deg,
+    var(--aura) 30deg 33deg, transparent 33deg 60deg,
+    var(--aura) 60deg 63deg, transparent 63deg 90deg,
+    var(--aura) 90deg 93deg, transparent 93deg 120deg,
+    var(--aura) 120deg 123deg, transparent 123deg 150deg,
+    var(--aura) 150deg 153deg, transparent 153deg 180deg,
+    var(--aura) 180deg 183deg, transparent 183deg 210deg,
+    var(--aura) 210deg 213deg, transparent 213deg 240deg,
+    var(--aura) 240deg 243deg, transparent 243deg 270deg,
+    var(--aura) 270deg 273deg, transparent 273deg 300deg,
+    var(--aura) 300deg 303deg, transparent 303deg 330deg,
+    var(--aura) 330deg 333deg, transparent 333deg 360deg);
+  -webkit-mask-image: radial-gradient(closest-side, transparent 34%, #000 56%, transparent 88%);
+  mask-image: radial-gradient(closest-side, transparent 34%, #000 56%, transparent 88%);
+  animation: aura-girar 9s linear infinite;
+}
+@keyframes aura-girar { to { transform: rotate(360deg); } }
+
+/* a estreia e a prisma trocam de cor enquanto giram */
+.aura-estreia .raios, .aura-prisma .raios {
+  background: conic-gradient(from 0deg,
+    #ff4fa3, #ffd86b, #7dd3fc, #b98cff, #ff4fa3);
+  animation: aura-girar 6s linear infinite;
+  opacity: .42;
+}
+
+/* ---------------------------------------------------------------- fogo
+ * Pacote quente. As línguas de fogo lambem a carta de baixo para cima,
+ * ancoradas no rodapé — que é exatamente a boca do pacote. */
+.chamas {
+  position: absolute;
+  left: -10%; right: -10%; bottom: -6%;
+  height: 62%;
+  z-index: 1;
+  pointer-events: none;
+}
+.chamas i {
+  position: absolute;
+  bottom: 0;
+  width: 26%;
+  height: 100%;
+  border-radius: 50% 50% 46% 46% / 62% 62% 38% 38%;
+  background: linear-gradient(0deg,
+    rgba(255,214,92,.95) 0%, rgba(255,122,26,.8) 34%,
+    rgba(255,48,10,.42) 66%, transparent 100%);
+  transform-origin: 50% 100%;
+  animation: lamber 780ms ease-in-out infinite alternate;
+}
+.chamas i:nth-child(1) { left:  -2%; animation-delay:   0ms; }
+.chamas i:nth-child(2) { left:  17%; animation-delay: 130ms; height: 82%; }
+.chamas i:nth-child(3) { left:  37%; animation-delay: 260ms; height: 118%; }
+.chamas i:nth-child(4) { left:  57%; animation-delay: 390ms; height: 88%; }
+.chamas i:nth-child(5) { left:  76%; animation-delay: 520ms; }
+@keyframes lamber {
+  0%   { transform: scaleY(.78) scaleX(1)    skewX(-4deg); opacity: .72; }
+  50%  { transform: scaleY(1.1) scaleX(.92)  skewX(3deg);  opacity: 1;   }
+  100% { transform: scaleY(.9)  scaleX(1.06) skewX(-2deg); opacity: .85; }
+}
+/* a borda inteira da carta esquenta, não só as pontas de fogo */
+.aura-fogo .halo { --aura: rgba(255,132,26,.85); animation-duration: .9s; }
+.aura-fogo.aura-base .halo { display: block; }
+
+/* ---------------------------------------------------------------- faixa */
+.faixa-aura {
+  position: absolute;
+  left: 50%; top: -6%;
+  transform: translateX(-50%);
+  z-index: 7;
+  white-space: nowrap;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  color: #0a0a0a;
+  background: var(--aura, #fff);
+  box-shadow: 0 0 22px -2px var(--aura, #fff);
+  pointer-events: none;
+  animation: faixa-entrar 420ms cubic-bezier(.2,.9,.3,1.3) both;
+}
+@keyframes faixa-entrar {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px) scale(.86); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0)    scale(1);   }
+}
+
+/* -------------------------------------------------------------- fagulhas
+ * Sopradas quando a carta sai de vez. Vivem na .cena, não na .janela, para
+ * poderem voar para fora do recorte. */
+.faisca {
+  position: absolute;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  z-index: 7;
+  pointer-events: none;
+  animation: voar 1.05s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .halo, .raios, .chamas i, .faixa-aura, .faisca { animation: none !important; }
+  .chamas, .faisca { display: none; }
+  .halo { opacity: .6; }
+}
+
+/* miniatura das já reveladas: guarda a marca do evento, em surdina */
+.mini-aura { position: relative; border-radius: 8px; }
+.mini-aura.aura-base { box-shadow: none; }
+.mini-aura:not(.aura-base) { box-shadow: 0 0 0 1px var(--aura), 0 0 14px -3px var(--aura); }
+.mini-aura.aura-fogo      { box-shadow: 0 0 0 1px rgba(255,132,26,.9), 0 0 16px -2px rgba(255,132,26,.8); }

@@ -33,6 +33,7 @@ export function CartaAberta({
   const [giroLiberado, setGiroLiberado] = useState(!giroscopioPrecisaDePermissao())
   const { jogador, recarregar } = useSessao()
   const [quantas, setQuantas] = useState(0)      // quantas você tem deste tipo
+  const [souDono, setSouDono] = useState(false)  // ESTA cópia é minha?
   const [confirmando, setConfirmando] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
   const [vendendo, setVendendo] = useState(false)
@@ -89,13 +90,24 @@ export function CartaAberta({
 
   // quantas cópias deste tipo você tem: a última nunca se vende (spec §19.4)
   useEffect(() => {
-    setConfirmando(false); setAviso(null)
+    setConfirmando(false); setAviso(null); setSouDono(false); setQuantas(0)
     if (!jogador) return
-    supabase.from('card_copies')
-      .select('id, card_types!inner(id)', { count: 'exact', head: true })
-      .eq('owner_id', jogador.id).eq('burned', false)
-      .eq('card_type_id', (carta as any).card_type_id ?? -1)
-      .then(({ count }) => setQuantas(count ?? 0))
+    ;(async () => {
+      // A posse é DESTA cópia, não do tipo. Antes eu contava quantas do mesmo
+      // tipo eu tinha — então abrir a carta de outro jogador na caçada de
+      // serial mostrava o botão de vender se eu tivesse uma igual.
+      const { data: dona } = await supabase.from('card_copies')
+        .select('owner_id').eq('id', carta.copy_id).single()
+      const meu = dona?.owner_id === jogador.id
+      setSouDono(meu)
+      if (!meu) return
+
+      const { count } = await supabase.from('card_copies')
+        .select('id', { count: 'exact', head: true })
+        .eq('owner_id', jogador.id).eq('burned', false)
+        .eq('card_type_id', (carta as any).card_type_id ?? -1)
+      setQuantas(count ?? 0)
+    })()
   }, [carta.copy_id, jogador])
 
   // os precos vivem em economy_config e o admin edita sem deploy (§19.7),
@@ -123,7 +135,7 @@ export function CartaAberta({
     const mult = precos.get(`restauro_mult_${carta.damage_level}`)
     return base != null && mult != null ? Math.floor(base * mult) : null
   })()
-  const minha = !!jogador && quantas > 0
+  const minha = souDono
   const podeVender = minha && quantas > 1 && carta.seal === 'none' && carta.tier !== 'prisma'
 
   async function restaurar() {

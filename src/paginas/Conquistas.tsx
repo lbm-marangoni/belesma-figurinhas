@@ -26,7 +26,11 @@ type Indice = { personagens: Personagem[]; descobertos: number; total_personagen
 type Par = { nickname: string; personagem: string; nome: string; em: string }
 type Rank = {
   nickname: string; copias: number; selos: number
-  melhor_serial: number; unos: number
+  melhor_serial: number | null; unos: number; pontos: number
+  /** os três troféus, cada um com critério próprio (ver private.pontos_carta) */
+  joia: Carta | null
+  menor_serial: Carta | null
+  melhor_selo: Carta | null
   destaques: Carta[]
 }
 
@@ -222,30 +226,70 @@ export default function Conquistas() {
       {/* ------------------------------------------------------ caçada */}
       <section>
         <h2 className="text-lg font-semibold tracking-tight">Caçada de serial</h2>
-        <p className="mb-2 text-xs text-neutral-500">Menores seriais e selos, por jogador.</p>
+        <p className="mb-3 max-w-3xl text-xs leading-relaxed text-neutral-500">
+          Três troféus por jogador, cada um com critério próprio e fixo — se
+          alguém tem duas candidatas, o desempate é sempre o mesmo.{' '}
+          <strong className="text-neutral-400">A joia</strong> é a carta mais
+          rara possível: raridade acima de tudo, depois selo, depois tiragem,
+          depois serial, com desgaste descontando e puxada valendo mais que
+          forjada. <strong className="text-neutral-400">Menor serial</strong>{' '}
+          empata pela tiragem menor e depois pela raridade.{' '}
+          <strong className="text-neutral-400">Melhor selo</strong> vai de rosa
+          a branco e empata pela raridade.
+        </p>
         <div className="space-y-2">
-          {rank.map((r) => (
-            <div key={r.nickname} className="rounded border border-neutral-800">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm">
-                <span className="font-medium">{r.nickname}</span>
-                <span className="chip"><strong>{r.selos}</strong> selos</span>
-                <span className="chip"><strong>{r.unos}</strong> nº 1</span>
-                <span className="chip">melhor serial <strong>{r.melhor_serial}</strong></span>
-                <span className="ml-auto text-neutral-500">{r.copias} cópias</span>
-              </div>
-              {r.destaques?.length > 0 && (
-                <div className="grid grid-cols-6 gap-1.5 border-t border-neutral-900 px-3 py-3
-                                sm:gap-2 lg:grid-cols-[repeat(12,minmax(0,1fr))]">
-                  {r.destaques.map((c, i) => (
-                    <button key={c.copy_id} onClick={() => setEmFoco({ lista: r.destaques, i })}
-                      title={`${c.character_name} · ${c.skin}`}>
-                      <Figurinha carta={c} tamanho="miniatura" />
-                    </button>
+          {rank.map((r) => {
+            const trofeus: [string, Carta | null][] = [
+              ['a joia', r.joia], ['menor serial', r.menor_serial], ['melhor selo', r.melhor_selo],
+            ]
+            return (
+              <div key={r.nickname} className="rounded border border-neutral-800">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm">
+                  <span className="font-medium">{r.nickname}</span>
+                  <span className="chip"><strong>{r.pontos}</strong> pts</span>
+                  <span className="chip"><strong>{r.selos}</strong> selos</span>
+                  <span className="chip"><strong>{r.unos}</strong> nº 1</span>
+                  <span className="chip">
+                    melhor serial <strong>{r.melhor_serial ?? '—'}</strong>
+                  </span>
+                  <span className="ml-auto text-neutral-500">{r.copias} cópias</span>
+                </div>
+
+                {/* os três troféus, cada um rotulado com o porquê */}
+                <div className="grid grid-cols-3 gap-2 border-t border-neutral-900 px-3 py-3">
+                  {trofeus.map(([rotulo, c]) => (
+                    <div key={rotulo} className="flex flex-col items-center gap-1">
+                      <span className="text-[10px] uppercase tracking-widest text-neutral-500">
+                        {rotulo}
+                      </span>
+                      {c ? (
+                        <button onClick={() => setEmFoco({ lista: [c], i: 0 })}
+                          title={`${c.character_name} · ${c.skin}`}>
+                          <Figurinha carta={c} tamanho="miniatura" />
+                        </button>
+                      ) : (
+                        <span className="grid aspect-[3/4] w-full max-w-[86px] place-items-center
+                                         rounded border border-dashed border-neutral-800
+                                         text-xs text-neutral-700">—</span>
+                      )}
+                    </div>
                   ))}
                 </div>
-              )}
-            </div>
-          ))}
+
+                {r.destaques?.length > 0 && (
+                  <div className="grid grid-cols-4 gap-1.5 border-t border-neutral-900 px-3 py-3
+                                  sm:grid-cols-8 sm:gap-2">
+                    {r.destaques.map((c, i) => (
+                      <button key={c.copy_id} onClick={() => setEmFoco({ lista: r.destaques, i })}
+                        title={`${c.character_name} · ${c.skin}`}>
+                        <Figurinha carta={c} tamanho="miniatura" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
           {rank.length === 0 && <p className="text-sm text-neutral-600">ninguém tem figurinha ainda</p>}
         </div>
       </section>

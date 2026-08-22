@@ -307,14 +307,26 @@
   display: flex;
   gap: .55rem;
   overflow-x: auto;
-  padding-bottom: .25rem;
+  overscroll-behavior-x: contain;
+  padding-bottom: .45rem;
   scrollbar-width: thin;
+  scrollbar-color: #3a3a41 transparent;
 }
+/* a barra do trilho precisa ser VISIVEL: sem ela ninguem descobre que da
+   para rolar e o deck parece ter so as 3 primeiras cartas */
+.deck-trilho::-webkit-scrollbar { height: 7px; }
+.deck-trilho::-webkit-scrollbar-track { background: #17171a; border-radius: 99px; }
+.deck-trilho::-webkit-scrollbar-thumb { background: #45454e; border-radius: 99px; }
+.deck-trilho::-webkit-scrollbar-thumb:hover { background: #5a5a64; }
+
 .deck-carta {
   position: relative;
   flex: 0 0 4.6rem;
   cursor: grab;
-  touch-action: none;
+  /* pan-x, nao none: com `none` o navegador entregava TODO gesto de toque
+     para o arraste e o trilho nao rolava mais no celular. Assim, deslizar
+     para o lado rola o deck e puxar para cima leva a figurinha ao slot. */
+  touch-action: pan-x;
   transition: transform 160ms ease;
 }
 .deck-carta:hover { transform: translateY(-6px); }

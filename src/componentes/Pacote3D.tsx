@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Figurinha } from './Figurinha'
+import { auraDaCarta } from '../lib/aura'
 import type { Carta, TipoPacote } from '../lib/tipos'
 import '../styles/pacote.css'
 
@@ -50,6 +51,7 @@ export function Pacote3D({
   const [puxada, setPuxada] = useState(REPOUSO)         // 0..1 da carta atual
   const [transicao, setTransicao] = useState<'' | 'assentando' | 'saindo'>('')
   const [reveladas, setReveladas] = useState<Carta[]>([])
+  const [faiscas, setFaiscas] = useState<React.CSSProperties[]>([])
 
   const cena = useRef<HTMLDivElement>(null)
   const arrasto = useRef<{ y0: number; alcance: number; moveu: boolean } | null>(null)
@@ -133,10 +135,29 @@ export function Pacote3D({
 
   useEffect(() => { if (etapa === 'final') aoTerminar() }, [etapa, aoTerminar])
 
+  // as fagulhas duram ~1s; some com elas antes da próxima carta emergir
+  useEffect(() => {
+    if (faiscas.length === 0) return
+    const t = setTimeout(() => setFaiscas([]), 1200)
+    return () => clearTimeout(t)
+  }, [faiscas])
+
   // ------------------------------------------------------------- puxar
   const concluir = useCallback(() => {
     setTransicao('saindo')
     setPuxada(1)
+    // fagulhas na cor da aura, sopradas da boca do pacote para fora
+    const a = auraDaCarta(cartas[indice], quente)
+    setFaiscas([...Array(a.faiscas)].map(() => ({
+      left: `${18 + Math.random() * 64}%`,
+      top: `${18 + Math.random() * 26}%`,
+      background: a.cor,
+      boxShadow: `0 0 8px 1px ${a.cor}`,
+      animationDelay: `${Math.random() * 220}ms`,
+      ['--dx' as string]: `${(Math.random() - 0.5) * 300}px`,
+      ['--dy' as string]: `${-60 - Math.random() * 190}px`,
+      ['--giro' as string]: `${(Math.random() - 0.5) * 540}deg`,
+    } as React.CSSProperties)))
     setTimeout(() => {
       setReveladas((r) => [...r, cartas[indice]])
       const proximo = indice + 1
@@ -145,7 +166,7 @@ export function Pacote3D({
       if (proximo >= cartas.length) setEtapa('final')
       else setIndice(proximo)
     }, 280)
-  }, [indice, cartas])
+  }, [indice, cartas, quente])
 
   const aoDescer = (e: React.PointerEvent) => {
     if (transicao) return
@@ -179,6 +200,7 @@ export function Pacote3D({
 
   const rasgado = etapa === 'rasgando' || etapa === 'puxando'
   const atual = cartas[indice]
+  const aura = atual ? auraDaCarta(atual, quente) : null
 
   return (
     <div className="abertura select-none py-4">
@@ -197,16 +219,35 @@ export function Pacote3D({
 
         {/* carta atual emergindo: a janela termina na linha da boca, então a
             figurinha só aparece na medida em que é puxada */}
-        {etapa === 'puxando' && atual && (
+        {etapa === 'puxando' && atual && aura && (
           <div className="janela" style={{ bottom: `${100 - rasgo.y}%` }}>
-            <div key={atual.copy_id} className={`carta-puxada ${transicao}`}>
+            <div
+              key={atual.copy_id}
+              className={`carta-puxada ${transicao} ${aura.classes.join(' ')}`}
+              style={{ ['--aura' as string]: aura.cor }}
+            >
+              <span className="halo" />
+              {aura.raios && <span className="raios" />}
+              {quente && <span className="chamas"><i /><i /><i /><i /><i /></span>}
               {/* o pulo fica aqui dentro para não brigar com o transform do arraste */}
-              <div className={puxada <= REPOUSO + 0.01 && !transicao ? 'espiando' : ''}>
-                <Figurinha carta={atual} tamanho="media" shader />
+              <div className="conteudo">
+                <div className={puxada <= REPOUSO + 0.01 && !transicao ? 'espiando' : ''}>
+                  <Figurinha carta={atual} tamanho="media" shader />
+                </div>
               </div>
             </div>
           </div>
         )}
+
+        {/* a faixa só aparece quando a carta já saiu o bastante para o nome
+            fazer sentido — antes disso ela entregaria a surpresa */}
+        {etapa === 'puxando' && aura?.rotulo && puxada > 0.42 && (
+          <span className="faixa-aura" style={{ ['--aura' as string]: aura.cor }}>
+            {aura.rotulo}
+          </span>
+        )}
+
+        {faiscas.map((estilo, i) => <span key={i} className="faisca" style={estilo} />)}
 
         <div
           className={[
@@ -259,9 +300,15 @@ export function Pacote3D({
       {/* as que já saíram ficam à mostra, na ordem em que foram puxadas */}
       {reveladas.length > 0 && (
         <div className="mx-auto mt-5 grid max-w-2xl grid-cols-3 gap-2 sm:grid-cols-5">
-          {reveladas.map((c) => (
-            <Figurinha key={c.copy_id} carta={c} tamanho="miniatura" shader />
-          ))}
+          {reveladas.map((c) => {
+            const a = auraDaCarta(c, quente)
+            return (
+              <div key={c.copy_id} className={`mini-aura ${a.classes.join(' ')}`}
+                   style={{ ['--aura' as string]: a.cor }}>
+                <Figurinha carta={c} tamanho="miniatura" shader />
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

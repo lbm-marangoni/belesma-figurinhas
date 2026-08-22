@@ -11,8 +11,18 @@ begin;
 --   - o cliente nunca escreve em card_copies, players, trades ou baba
 --   - nao existe admin_key: a guarda e players.is_admin, checada no banco
 
-create extension if not exists citext;
-create extension if not exists pgcrypto;
+-- pgcrypto e citext: no Supabase eles moram no schema "extensions"; num
+-- Postgres cru (e no PGlite do harness) cairiam em "public". Fixamos os dois
+-- em "extensions" nos dois ambientes para que um unico search_path sirva.
+--
+-- Isto NAO e detalhe: as funcoes abaixo tem "set search_path" explicito, que
+-- e obrigatorio em security definer. Sem "extensions" nessa lista,
+-- gen_random_bytes() nao resolve e o sorteio de selo quebra - foi exatamente
+-- o que aconteceu na primeira tentativa de deploy.
+create schema if not exists extensions;
+create extension if not exists citext   with schema extensions;
+create extension if not exists pgcrypto with schema extensions;
+grant usage on schema extensions to public;
 
 create schema if not exists private;
 
@@ -63,7 +73,7 @@ create table if not exists public.skins (
 -- ---------------------------------------------------------------- characters
 create table if not exists public.characters (
   id              serial primary key,
-  slug            citext not null unique,
+  slug            extensions.citext not null unique,
   name            text   not null,
   display_order   int    not null,
   palette_primary text   not null,
@@ -101,7 +111,7 @@ create index if not exists card_types_tier_idx      on public.card_types(tier);
 -- ---------------------------------------------------------------- players
 create table if not exists public.players (
   id                  uuid primary key references auth.users(id) on delete cascade,
-  nickname            citext not null unique,
+  nickname            extensions.citext not null unique,
 
   -- allotment inicial (secao 8): 12 comuns, 5 raros, 2 ultra
   packs_common        int not null default 0 check (packs_common       >= 0),
@@ -330,6 +340,7 @@ create or replace function private.random_int(n int)
 returns int
 language plpgsql
 volatile
+set search_path = public, extensions, pg_temp
 as $$
 declare
   limite bigint;
@@ -359,7 +370,7 @@ returns void
 language plpgsql
 stable
 security definer
-set search_path = public, pg_temp
+set search_path = public, extensions, pg_temp
 as $$
 begin
   if not exists (
@@ -390,7 +401,7 @@ returns void
 language plpgsql
 volatile
 security definer
-set search_path = public, pg_temp
+set search_path = public, extensions, pg_temp
 as $fn$
 declare
   n_total int;
@@ -448,7 +459,7 @@ returns int
 language plpgsql
 volatile
 security definer
-set search_path = public, pg_temp
+set search_path = public, extensions, pg_temp
 as $fn$
 declare
   ja_tem int;
@@ -483,6 +494,22 @@ begin
 end;
 $fn$;
 
+-- Mesma guarda, em forma de boolean, para usar DENTRO de policy.
+--
+-- Precisa ser security definer: uma policy e avaliada com os privilegios de
+-- quem consulta, e authenticated nao tem SELECT em players. Escrever o
+-- "exists (select 1 from players ...)" direto na policy negava ate para admin
+-- de verdade - o erro saia como "permission denied for table players".
+create or replace function public.sou_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+  select exists (select 1 from public.players where id = auth.uid() and is_admin);
+$$;
+
 -- Secao 9: o proprio jogador precisa ler baba, pacotes e pity, que nao sao
 -- publicos. A leitura da linha inteira passa por aqui, nunca por GRANT.
 create or replace function public.me()
@@ -490,7 +517,7 @@ returns public.players
 language sql
 stable
 security definer
-set search_path = public, pg_temp
+set search_path = public, extensions, pg_temp
 as $$
   select * from public.players where id = auth.uid();
 $$;
@@ -507,6 +534,7 @@ create or replace view public.players_public as
 -- Explicito para nao virar acidente: me() e a view so enxergam a tabela
 -- porque rodam como o dono. Trocar o dono para um papel comum quebra as duas.
 alter function public.me() owner to postgres;
+alter function public.sou_admin() owner to postgres;
 alter view public.players_public owner to postgres;
 
 
@@ -618,7 +646,7 @@ insert into public.card_copies (card_type_id, serial_number, verify_code)
 select ct.id,
        s,
        upper(substr(
-         encode(digest('belesma-v1|' || ch.slug || '|' || ct.skin || '|' || s::text, 'sha256'), 'hex'),
+         encode(extensions.digest('belesma-v1|' || ch.slug || '|' || ct.skin || '|' || s::text, 'sha256'), 'hex'),
          1, 10))
 from public.card_types ct
 join public.characters ch on ch.id = ct.character_id
@@ -739,6 +767,14 @@ on conflict (chave) do nothing;
 -- authenticated. Por isso o REVOKE abaixo nao e decorativo: sem ele, a RLS
 -- ficaria por cima de GRANTs abertos.
 
+-- service_role e o papel de servidor de confianca: bypassa RLS e precisa de
+-- GRANT explicito. O Supabase concede por default, mas essa configuracao vive
+-- presa ao schema - se alguem recriar o schema public, ela some junto e o
+-- painel e os scripts administrativos param de enxergar as tabelas.
+-- Conceder aqui torna a migracao autossuficiente.
+-- A chave de service_role NUNCA vai para o navegador.
+grant usage on schema public to postgres, anon, authenticated, service_role;
+
 revoke all on all tables    in schema public from anon, authenticated;
 revoke all on all sequences in schema public from anon, authenticated;
 revoke all on all functions in schema public from anon, authenticated;
@@ -853,9 +889,10 @@ grant select on public.baba_log to authenticated;
 drop policy if exists admin_log_leitura on public.admin_log;
 create policy admin_log_leitura on public.admin_log
   for select to authenticated
-  using (exists (select 1 from public.players p where p.id = auth.uid() and p.is_admin));
+  using (public.sou_admin());
 
 grant select on public.admin_log to authenticated;
+grant execute on function public.sou_admin() to authenticated;
 
 -- ================================================================ auditoria de pacote
 drop policy if exists pack_openings_leitura on public.pack_openings;
@@ -883,6 +920,3277 @@ grant select on public.album_page_rewards to authenticated;
 
 -- trade_rewards e trava interna: ninguem le, ninguem escreve, so as RPCs.
 -- Sem policy e sem grant de proposito.
+
+-- ================================================================ service_role
+-- Depois de todos os REVOKE acima, devolve tudo ao papel de servidor.
+grant all on all tables     in schema public to service_role;
+grant all on all sequences  in schema public to service_role;
+grant all on all functions  in schema public to service_role;
+grant usage on schema private to service_role;
+grant all on all functions in schema private to service_role;
+
+alter default privileges in schema public grant all on tables    to service_role;
+alter default privileges in schema public grant all on sequences to service_role;
+alter default privileges in schema public grant all on functions to service_role;
+
+
+-- ===== 20260822100000_rpc_jogador.sql =====
+-- BELESMA figurinhas - Fase 2: RPCs de jogador (spec secoes 8, 9, 10)
+--
+-- Regra que este arquivo obedece acima de tudo: o cliente nunca sorteia e
+-- nunca escreve. Tudo aqui e security definer e atomico.
+
+-- ================================================================ helpers
+-- Peso -> escolha, com UM unico sorteio contra a soma cumulativa (secao 8).
+-- Nao e uma sequencia de moedas tier a tier: aquilo distorce a tabela.
+create or replace function private.escolher_ponderado(pesos numeric[])
+returns int
+language plpgsql
+volatile
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  total numeric := 0;
+  ponto numeric;
+  acumulado numeric := 0;
+  i int;
+begin
+  foreach ponto in array pesos loop total := total + ponto; end loop;
+  if total <= 0 then return null; end if;
+
+  -- random_int da inteiro; multiplicamos por 1e6 para ter resolucao decimal
+  ponto := (private.random_int(1000000)::numeric / 1000000) * total;
+
+  for i in 1 .. array_length(pesos, 1) loop
+    acumulado := acumulado + pesos[i];
+    if ponto < acumulado then return i; end if;
+  end loop;
+  return array_length(pesos, 1);
+end;
+$$;
+
+-- ================================================================ login
+-- Secao 10: apelido + senha, e-mail sintetico interno. O cadastro no Auth
+-- acontece no cliente (supabase.auth.signUp); esta RPC cria a linha de
+-- players e entrega o allotment inicial.
+create or replace function public.nickname_disponivel(p_nickname text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+  select not exists (
+    select 1 from public.players where nickname = p_nickname::extensions.citext
+  );
+$$;
+
+create or replace function public.claim_nickname(p_nickname text)
+returns public.players
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_email text;
+  v_row   public.players;
+begin
+  if v_uid is null then
+    raise exception 'precisa estar logado' using errcode = '42501';
+  end if;
+
+  -- Idempotente: chamar de novo devolve a linha, nao duplica allotment.
+  select * into v_row from public.players where id = v_uid;
+  if found then return v_row; end if;
+
+  if p_nickname !~ '^[a-z0-9][a-z0-9_-]{2,19}$' then
+    raise exception 'apelido invalido: 3 a 20 caracteres, minusculas, numeros, - e _';
+  end if;
+
+  -- O apelido tem que bater com o e-mail sintetico do proprio JWT, senao
+  -- daria para cadastrar como "fulano" e reivindicar o apelido "beltrano".
+  select email into v_email from auth.users where id = v_uid;
+  if lower(split_part(v_email, '@', 1)) <> lower(p_nickname) then
+    raise exception 'apelido nao confere com a conta';
+  end if;
+
+  insert into public.players (id, nickname, packs_common, packs_rare, packs_ultra)
+  values (
+    v_uid,
+    p_nickname::extensions.citext,
+    (select valor from public.pack_params where chave = 'allotment_comum')::int,
+    (select valor from public.pack_params where chave = 'allotment_raro')::int,
+    (select valor from public.pack_params where chave = 'allotment_ultra')::int
+  )
+  returning * into v_row;
+
+  return v_row;
+exception
+  when unique_violation then
+    raise exception 'esse apelido ja existe';
+end;
+$$;
+
+-- A coluna vive na sua propria migracao (20260822140000), mas open_pack
+-- referencia ela. Como as migracoes rodam por ordem de nome e esta e mais
+-- antiga, garante aqui tambem. Idempotente nos dois caminhos.
+alter table public.pack_opening_cards
+  add column if not exists garantido boolean not null default false;
+
+-- ================================================================ open_pack
+-- Secao 8 inteira: 3 base + 1 hit, promocao, pacote quente, carta bonus,
+-- pity, regras duras, cascata de esgotamento e ordem embaralhada.
+--
+-- Atomica: se qualquer coisa falhar, nada foi distribuido. As cartas ficam
+-- gravadas ANTES de qualquer animacao - fechar a aba no meio nao perde nada.
+create or replace function public.open_pack(pack_type text)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid        uuid := auth.uid();
+  v_jogador    public.players;
+  v_tipo       public.pack_type := pack_type::public.pack_type;
+  v_do_diario  boolean := false;
+
+  v_quente     boolean := false;
+  v_bonus      boolean := false;
+  v_pity       boolean := false;
+  v_promovidos int := 0;
+
+  v_n_base     int;
+  v_pity_lim   int;
+  v_slots      int;
+  v_i          int;
+  v_tent       int;
+
+  v_da_tabela  boolean;
+  v_garantido  boolean;
+  v_tier       text;
+  v_type_id    int;
+  v_copy_id    bigint;
+  v_reserva    boolean;
+
+  v_tiers      text[];
+  v_pesos      numeric[];
+  v_idx        int;
+  v_piso       smallint;
+
+  v_usados     int[] := '{}';
+  v_copias     bigint[] := '{}';
+  v_tiers_saiu text[] := '{}';
+  v_do_hit     boolean[] := '{}';
+  v_garantidos boolean[] := '{}';
+
+  v_abertura   bigint;
+  v_ordem      int[];
+  v_tmp        int;
+  v_j          int;
+  v_resultado  jsonb;
+begin
+  if v_uid is null then
+    raise exception 'precisa estar logado' using errcode = '42501';
+  end if;
+
+  -- Trava o jogador: duas abas do mesmo dono nao gastam o mesmo pacote.
+  select * into v_jogador from public.players where id = v_uid for update;
+  if not found then
+    raise exception 'jogador nao encontrado' using errcode = '42501';
+  end if;
+
+  -- Gasta primeiro os pacotes do diario (secao 8). Sao eles que puxam os
+  -- slots base de dentro da reserva.
+  if v_tipo = 'comum' then
+    if v_jogador.packs_common_daily > 0 then
+      v_do_diario := true;
+      update public.players set packs_common_daily = packs_common_daily - 1 where id = v_uid;
+    elsif v_jogador.packs_common > 0 then
+      update public.players set packs_common = packs_common - 1 where id = v_uid;
+    else raise exception 'sem pacote comum'; end if;
+  elsif v_tipo = 'raro' then
+    if v_jogador.packs_rare_daily > 0 then
+      v_do_diario := true;
+      update public.players set packs_rare_daily = packs_rare_daily - 1 where id = v_uid;
+    elsif v_jogador.packs_rare > 0 then
+      update public.players set packs_rare = packs_rare - 1 where id = v_uid;
+    else raise exception 'sem pacote raro'; end if;
+  else
+    if v_jogador.packs_ultra_daily > 0 then
+      v_do_diario := true;
+      update public.players set packs_ultra_daily = packs_ultra_daily - 1 where id = v_uid;
+    elsif v_jogador.packs_ultra > 0 then
+      update public.players set packs_ultra = packs_ultra - 1 where id = v_uid;
+    else raise exception 'sem pacote ultra'; end if;
+  end if;
+
+  v_n_base   := (select valor from public.pack_params where chave = 'cartas_base')::int;
+  v_pity_lim := (select valor from public.pack_params where chave = 'pity_limite')::int;
+
+  v_quente := private.random_int(100000) <
+              (select valor from public.pack_params where chave = 'pacote_quente')::numeric * 100000;
+  v_bonus  := private.random_int(100000) <
+              (select valor from public.pack_params where chave = 'carta_bonus')::numeric * 100000;
+  v_pity   := v_tipo = 'comum' and v_jogador.pity_counter >= v_pity_lim;
+
+  -- slots: base + 1 hit (+1 se veio bonus). O hit e sempre o ultimo.
+  v_slots := v_n_base + 1 + (case when v_bonus then 1 else 0 end);
+
+  for v_i in 1 .. v_slots loop
+    -- o slot de hit e o de indice v_n_base + 1; bonus entra como base extra
+    v_da_tabela := (v_i = v_n_base + 1);
+    v_garantido := false;
+
+    if v_quente then
+      v_da_tabela := true;
+      v_garantido := true;                        -- pacote quente e slot garantido
+    elsif not v_da_tabela then
+      if private.random_int(100000) <
+         (select valor from public.pack_params where chave = 'promocao_base')::numeric * 100000 then
+        v_da_tabela := true;
+        v_garantido := true;                      -- promocao tambem e garantido
+        v_promovidos := v_promovidos + 1;
+      end if;
+    elsif v_pity then
+      v_garantido := true;                        -- pity idem
+    end if;
+
+    -- ---------------------------------------------------------- escolhe tier
+    v_piso := case
+                when v_pity and v_da_tabela then
+                  (select tier_order from public.tiers where slug = 'epica')
+                else 0 end;
+
+    -- Pesos so dos tiers COM ESTOQUE, renormalizados antes do sorteio
+    -- (secao 8). E isso que preserva a garantia do pacote: se mitica zerar,
+    -- o Ultra redistribui entre cosmica+ em vez de cair para lendaria.
+    select array_agg(x.tier order by x.tier_order), array_agg(x.weight order by x.tier_order)
+      into v_tiers, v_pesos
+    from (
+      select pc.tier, t.tier_order, pc.weight
+      from public.pack_config pc
+      join public.tiers t on t.slug = pc.tier
+      where pc.pack_type = v_tipo
+        and pc.slot = (case when v_da_tabela then 'hit' else 'base' end)::public.pack_slot
+        and pc.weight > 0
+        and t.tier_order >= v_piso
+        -- regra dura: diamante e prisma nunca em slot garantido
+        and not (v_garantido and t.slug in ('diamante','prisma'))
+        and exists (
+          select 1 from public.card_copies cc
+          join public.card_types ct on ct.id = cc.card_type_id
+          where ct.tier = pc.tier and cc.owner_id is null and not cc.burned
+            and cc.reserved_for_daily = (v_do_diario and not v_da_tabela)
+        )
+    ) x;
+
+    -- Cascata: nada no nivel tem estoque. Desce um degrau e tenta de novo.
+    if v_tiers is null then
+      select array_agg(t.slug order by t.tier_order), array_agg(1::numeric)
+        into v_tiers, v_pesos
+      from public.tiers t
+      where t.slug not in ('diamante','prisma')
+        and exists (
+          select 1 from public.card_copies cc
+          join public.card_types ct on ct.id = cc.card_type_id
+          where ct.tier = t.slug and cc.owner_id is null and not cc.burned
+            and cc.reserved_for_daily = (v_do_diario and not v_da_tabela)
+        );
+    end if;
+
+    -- Sem estoque em lugar nenhum: o pacote sai menor, e o front avisa.
+    exit when v_tiers is null;
+
+    v_idx  := private.escolher_ponderado(v_pesos);
+    v_tier := v_tiers[v_idx];
+    v_reserva := (v_do_diario and not v_da_tabela);
+
+    -- -------------------------------------------------- escolhe skin no tier
+    -- Peso proporcional ao ESTOQUE RESTANTE: drena os tipos do tier juntos
+    -- em vez de esgotar uma skin muito antes das outras (secao 8).
+    -- Tipos ja sorteados neste pacote saem do sorteio.
+    v_type_id := null;
+    select x.id into v_type_id
+    from (
+      select ct.id,
+             sum(count(*)) over () as total,
+             count(*) as estoque,
+             sum(count(*)) over (order by ct.id rows between unbounded preceding and current row) as ate_aqui
+      from public.card_types ct
+      join public.card_copies cc on cc.card_type_id = ct.id
+      where ct.tier = v_tier and cc.owner_id is null and not cc.burned
+        and cc.reserved_for_daily = v_reserva
+        and not (ct.id = any(v_usados))
+      group by ct.id
+    ) x
+    where x.ate_aqui > (private.random_int(1000000)::numeric / 1000000) * x.total
+    order by x.ate_aqui
+    limit 1;
+
+    -- so sobrou tipo repetido: aceita a repeticao em vez de entregar menos
+    if v_type_id is null then
+      select ct.id into v_type_id
+      from public.card_types ct
+      join public.card_copies cc on cc.card_type_id = ct.id
+      where ct.tier = v_tier and cc.owner_id is null and not cc.burned
+        and cc.reserved_for_daily = v_reserva
+      group by ct.id
+      order by extensions.gen_random_bytes(8)
+      limit 1;
+    end if;
+    continue when v_type_id is null;
+
+    -- ------------------------------------------------- escolhe a copia
+    -- Serial ALEATORIO, nunca em ordem: em ordem a cacada de serial da
+    -- secao 11 vira "quem abriu primeiro" em vez de sorte.
+    v_copy_id := null;
+    for v_tent in 1 .. 5 loop
+      select cc.id into v_copy_id
+      from public.card_copies cc
+      where cc.card_type_id = v_type_id
+        and cc.owner_id is null and not cc.burned
+        and cc.reserved_for_daily = v_reserva
+      order by extensions.gen_random_bytes(8)
+      limit 1
+      for update skip locked;
+      exit when v_copy_id is not null;
+    end loop;
+    continue when v_copy_id is null;
+
+    update public.card_copies
+    set owner_id = v_uid,
+        claimed_at = now(),
+        first_discovered_at = coalesce(first_discovered_at, now()),
+        first_discovered_by = coalesce(first_discovered_by, v_uid)
+    where id = v_copy_id;
+
+    insert into public.copy_history (copy_id, from_player, to_player, kind)
+    values (v_copy_id, null, v_uid, case when v_do_diario then 'daily' else 'pull' end);
+
+    v_usados     := v_usados     || v_type_id;
+    v_copias     := v_copias     || v_copy_id;
+    v_tiers_saiu := v_tiers_saiu || v_tier;
+    v_do_hit     := v_do_hit     || v_da_tabela;
+    v_garantidos := v_garantidos || v_garantido;
+  end loop;
+
+  if array_length(v_copias, 1) is null then
+    raise exception 'sem estoque: nao foi possivel montar o pacote';
+  end if;
+
+  -- ---------------------------------------------------------------- pity
+  if v_tipo = 'comum' then
+    if v_pity or exists (
+      select 1 from unnest(v_tiers_saiu) s
+      join public.tiers t on t.slug = s
+      where t.tier_order > (select tier_order from public.tiers where slug = 'rara')
+    ) then
+      update public.players set pity_counter = 0 where id = v_uid;
+    else
+      update public.players set pity_counter = pity_counter + 1 where id = v_uid;
+    end if;
+  end if;
+
+  -- ------------------------------------------------------- ordem de revelacao
+  -- Fisher-Yates no servidor. O hit pode ser a 1a, 2a, 3a ou 4a.
+  v_ordem := array(select generate_series(1, array_length(v_copias, 1)));
+  for v_i in reverse array_length(v_ordem, 1) .. 2 loop
+    v_j := private.random_int(v_i) + 1;
+    v_tmp := v_ordem[v_i]; v_ordem[v_i] := v_ordem[v_j]; v_ordem[v_j] := v_tmp;
+  end loop;
+
+  -- ---------------------------------------------------------------- auditoria
+  insert into public.pack_openings (player_id, pack_type, from_daily, promoted_slots, hot, pity, bonus)
+  values (v_uid, v_tipo, v_do_diario, v_promovidos, v_quente, v_pity, v_bonus)
+  returning id into v_abertura;
+
+  for v_i in 1 .. array_length(v_copias, 1) loop
+    insert into public.pack_opening_cards
+      (opening_id, copy_id, slot_index, reveal_index, tier, from_hit_table, garantido)
+    values
+      (v_abertura, v_copias[v_i], v_i, array_position(v_ordem, v_i),
+       v_tiers_saiu[v_i], v_do_hit[v_i], v_garantidos[v_i]);
+  end loop;
+
+  -- ---------------------------------------------------------------- resposta
+  select jsonb_build_object(
+    'abertura', v_abertura,
+    'pack_type', v_tipo,
+    'do_diario', v_do_diario,
+    'quente', v_quente,
+    'bonus', v_bonus,
+    'pity', v_pity,
+    'promovidos', v_promovidos,
+    'esperado', v_slots,
+    'cartas', coalesce(jsonb_agg(c order by c->>'reveal_index'), '[]'::jsonb)
+  ) into v_resultado
+  from (
+    select jsonb_build_object(
+      'copy_id', cc.id,
+      'card_type_id', cc.card_type_id,
+      'reveal_index', poc.reveal_index,
+      'from_hit_table', poc.from_hit_table,
+      'garantido', poc.garantido,
+      'serial_number', cc.serial_number,
+      'print_run', ct.print_run,
+      'seal', cc.seal,
+      'origin', cc.origin,
+      'damage_level', cc.damage_level,
+      'verify_code', cc.verify_code,
+      'tier', ct.tier,
+      'tier_order', ct.tier_order,
+      'skin', ct.skin,
+      'art_path', ct.art_path,
+      'character_slug', ch.slug,
+      'character_name', ch.name,
+      'estreia_mundial', cc.first_discovered_by = v_uid and cc.first_discovered_at >= now() - interval '1 minute',
+      'nova', not exists (
+        select 1 from public.card_copies o
+        where o.card_type_id = cc.card_type_id and o.owner_id = v_uid and o.id <> cc.id
+      )
+    ) as c
+    from public.pack_opening_cards poc
+    join public.card_copies cc on cc.id = poc.copy_id
+    join public.card_types  ct on ct.id = cc.card_type_id
+    join public.characters  ch on ch.id = ct.character_id
+    where poc.opening_id = v_abertura
+  ) t;
+
+  return v_resultado;
+end;
+$$;
+
+-- ================================================================ permissoes
+revoke all on function public.open_pack(text)          from public, anon;
+revoke all on function public.claim_nickname(text)     from public, anon;
+revoke all on function public.nickname_disponivel(text) from public;
+
+grant execute on function public.open_pack(text)           to authenticated;
+grant execute on function public.claim_nickname(text)      to authenticated;
+grant execute on function public.nickname_disponivel(text) to anon, authenticated;
+
+alter function public.open_pack(text)           owner to postgres;
+alter function public.claim_nickname(text)      owner to postgres;
+alter function public.nickname_disponivel(text) owner to postgres;
+
+
+-- ===== 20260822100100_rpc_admin.sql =====
+-- BELESMA figurinhas - Fase 2: RPCs administrativas (spec secao 18)
+--
+-- NAO existe admin_key. Toda funcao aqui comeca com private.require_admin(),
+-- que checa auth.uid() contra players.is_admin dentro do banco.
+--
+-- Elas sao CHAMAVEIS por authenticated de proposito: o erro precisa ser
+-- "nao autorizado", nao "function does not exist", para o teste de fraude da
+-- secao 17 ser conclusivo.
+
+create or replace function private.registrar(p_acao text, p_alvo text, p_payload jsonb)
+returns void
+language sql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+  insert into public.admin_log (admin_id, acao, alvo, payload)
+  values (auth.uid(), p_acao, p_alvo, p_payload);
+$$;
+
+-- ================================================================ jogadores
+create or replace function public.admin_jogadores()
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+begin
+  perform private.require_admin();
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', p.id, 'nickname', p.nickname, 'created_at', p.created_at,
+      'is_admin', p.is_admin, 'baba', p.baba,
+      'copias', (select count(*) from public.card_copies cc where cc.owner_id = p.id),
+      'pacotes', jsonb_build_object(
+        'comum', p.packs_common, 'raro', p.packs_rare, 'ultra', p.packs_ultra,
+        'comum_diario', p.packs_common_daily, 'raro_diario', p.packs_rare_daily,
+        'ultra_diario', p.packs_ultra_daily),
+      'last_daily_at', p.last_daily_at, 'pity_counter', p.pity_counter
+    ) order by p.created_at)
+    from public.players p), '[]'::jsonb);
+end;
+$$;
+
+create or replace function public.grant_packs(p_target text, p_pack_type text, p_quantidade int)
+returns int
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_n int; v_tipo public.pack_type := p_pack_type::public.pack_type;
+begin
+  perform private.require_admin();
+  if p_quantidade is null or p_quantidade = 0 then raise exception 'quantidade invalida'; end if;
+
+  update public.players p
+  set packs_common = p.packs_common + (case when v_tipo = 'comum' then p_quantidade else 0 end),
+      packs_rare   = p.packs_rare   + (case when v_tipo = 'raro'  then p_quantidade else 0 end),
+      packs_ultra  = p.packs_ultra  + (case when v_tipo = 'ultra' then p_quantidade else 0 end)
+  where p_target = 'todos' or p.nickname = p_target::extensions.citext;
+  get diagnostics v_n = row_count;
+
+  perform private.registrar('grant_packs', p_target,
+    jsonb_build_object('pack_type', p_pack_type, 'quantidade', p_quantidade, 'jogadores', v_n));
+  return v_n;
+end;
+$$;
+
+create or replace function public.admin_reset_password(p_nickname text, p_nova_senha text)
+returns void
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_id uuid;
+begin
+  perform private.require_admin();
+  if length(coalesce(p_nova_senha, '')) < 6 then raise exception 'senha minima de 6 caracteres'; end if;
+
+  select id into v_id from public.players where nickname = p_nickname::extensions.citext;
+  if v_id is null then raise exception 'jogador nao encontrado'; end if;
+
+  -- Secao 10: nao existe recuperacao automatica; o reset e manual e passa
+  -- por aqui. A senha nunca e gravada no admin_log.
+  update auth.users
+  set encrypted_password = extensions.crypt(p_nova_senha, extensions.gen_salt('bf')),
+      updated_at = now()
+  where id = v_id;
+
+  perform private.registrar('admin_reset_password', p_nickname, jsonb_build_object('senha', 'omitida'));
+end;
+$$;
+
+create or replace function public.admin_reset_daily_cooldown(p_nickname text)
+returns void
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+begin
+  perform private.require_admin();
+  update public.players set last_daily_at = null where nickname = p_nickname::extensions.citext;
+  if not found then raise exception 'jogador nao encontrado'; end if;
+  perform private.registrar('admin_reset_daily_cooldown', p_nickname, '{}'::jsonb);
+end;
+$$;
+
+-- ================================================================ odds e precos
+create or replace function public.admin_set_pack_config(p_rows jsonb)
+returns int
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_antes jsonb; v_n int; v_erro text;
+begin
+  perform private.require_admin();
+
+  select jsonb_agg(to_jsonb(pc)) into v_antes from public.pack_config pc;
+
+  update public.pack_config pc
+  set weight = (r->>'weight')::numeric
+  from jsonb_array_elements(p_rows) r
+  where pc.pack_type = (r->>'pack_type')::public.pack_type
+    and pc.slot      = (r->>'slot')::public.pack_slot
+    and pc.tier      = r->>'tier';
+  get diagnostics v_n = row_count;
+
+  -- Secao 18.1: cada tipo de pacote soma 100%. Nao salva torto.
+  select string_agg(x.pack_type || '/' || x.slot || ' = ' || x.total, ', ')
+    into v_erro
+  from (select pack_type::text, slot::text, sum(weight) as total
+        from public.pack_config group by pack_type, slot) x
+  where x.total <> 100;
+
+  if v_erro is not null then
+    raise exception 'as odds precisam somar 100: %', v_erro;
+  end if;
+
+  perform private.registrar('admin_set_pack_config', null,
+    jsonb_build_object('antes', v_antes, 'depois', p_rows, 'linhas', v_n));
+  return v_n;
+end;
+$$;
+
+create or replace function public.admin_set_economy_config(p_rows jsonb)
+returns int
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_antes jsonb; v_n int;
+begin
+  perform private.require_admin();
+  select jsonb_agg(to_jsonb(ec)) into v_antes from public.economy_config ec;
+
+  update public.economy_config ec
+  set valor = (r->>'valor')::numeric
+  from jsonb_array_elements(p_rows) r
+  where ec.chave = r->>'chave';
+  get diagnostics v_n = row_count;
+
+  perform private.registrar('admin_set_economy_config', null,
+    jsonb_build_object('antes', v_antes, 'depois', p_rows, 'linhas', v_n));
+  return v_n;
+end;
+$$;
+
+-- ================================================================ estoque
+create or replace function public.top_up_daily_reserve(p_n int)
+returns int
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_por_char int; v_total int := 0; v_c record;
+begin
+  perform private.require_admin();
+  if p_n is null or p_n <= 0 then raise exception 'n invalido'; end if;
+
+  v_por_char := ceil(p_n::numeric / greatest((select count(*) from public.characters), 1));
+  for v_c in select id from public.characters order by id loop
+    v_total := v_total + private.reservar_diario(v_c.id,
+      (select count(*) from public.card_copies cc
+       join public.card_types ct on ct.id = cc.card_type_id
+       where ct.character_id = v_c.id and cc.reserved_for_daily and not cc.burned)::int + v_por_char);
+  end loop;
+
+  perform private.registrar('top_up_daily_reserve', null,
+    jsonb_build_object('pedido', p_n, 'marcadas', v_total));
+  return v_total;
+end;
+$$;
+
+create or replace function public.admin_stock_report()
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+begin
+  perform private.require_admin();
+  return jsonb_build_object(
+    'por_tier', (
+      select coalesce(jsonb_agg(x order by x->>'tier_order'), '[]'::jsonb) from (
+        select jsonb_build_object(
+          'tier', t.slug, 'tier_order', t.tier_order,
+          'total', count(cc.id),
+          'distribuidas', count(*) filter (where cc.owner_id is not null),
+          'queimadas',    count(*) filter (where cc.burned),
+          'reservadas',   count(*) filter (where cc.reserved_for_daily and cc.owner_id is null),
+          'disponiveis',  count(*) filter (where cc.owner_id is null and not cc.burned)
+        ) as x
+        from public.tiers t
+        join public.card_types ct on ct.tier = t.slug
+        join public.card_copies cc on cc.card_type_id = ct.id
+        group by t.slug, t.tier_order) y),
+    'por_personagem', (
+      select coalesce(jsonb_agg(x order by x->>'display_order'), '[]'::jsonb) from (
+        select jsonb_build_object(
+          'personagem', ch.slug, 'display_order', ch.display_order,
+          'total', count(cc.id),
+          'distribuidas', count(*) filter (where cc.owner_id is not null),
+          'queimadas',    count(*) filter (where cc.burned),
+          'disponiveis',  count(*) filter (where cc.owner_id is null and not cc.burned)
+        ) as x
+        from public.characters ch
+        join public.card_types ct on ct.character_id = ch.id
+        join public.card_copies cc on cc.card_type_id = ct.id
+        group by ch.slug, ch.display_order) y),
+    'selos', (
+      select jsonb_build_object(
+        'emitidos', count(*) filter (where cc.seal <> 'none'),
+        'em_posse', count(*) filter (where cc.seal <> 'none' and cc.owner_id is not null),
+        'branco', count(*) filter (where cc.seal = 'branco'),
+        'preto',  count(*) filter (where cc.seal = 'preto'),
+        'rosa',   count(*) filter (where cc.seal = 'rosa'))
+      from public.card_copies cc),
+    'desgaste', (
+      select coalesce(jsonb_object_agg(damage_level::text, n), '{}'::jsonb)
+      from (select damage_level, count(*) as n from public.card_copies group by damage_level) d),
+    'reserva_diaria', (
+      select count(*) from public.card_copies where reserved_for_daily and owner_id is null)
+  );
+end;
+$$;
+
+-- O banco nao enxerga disco. Devolve o catalogo com os caminhos; quem
+-- confere a existencia do arquivo e o painel, com um HEAD em cada um.
+create or replace function public.admin_missing_art()
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+begin
+  perform private.require_admin();
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'card_type_id', ct.id, 'personagem', ch.slug, 'skin', ct.skin, 'art_path', ct.art_path)
+      order by ch.display_order, ct.tier_order)
+    from public.card_types ct join public.characters ch on ch.id = ct.character_id), '[]'::jsonb);
+end;
+$$;
+
+-- ================================================================ conteudo
+create or replace function public.seed_edition_dry_run(p_params jsonb)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_slug text := lower(p_params->>'slug');
+begin
+  perform private.require_admin();
+  if v_slug is null or v_slug !~ '^[a-z0-9][a-z0-9-]{2,19}$' then
+    raise exception 'slug invalido';
+  end if;
+
+  return jsonb_build_object(
+    'slug', v_slug,
+    'ja_existe', exists (select 1 from public.characters where slug = v_slug::extensions.citext),
+    'card_types', (select count(*) from public.skins),
+    'card_copies', (select sum(t.print_run) from public.skins s join public.tiers t on t.slug = s.tier),
+    'selos', jsonb_build_object('branco', 12, 'preto', 4, 'rosa', 1),
+    'reserva_diaria', 500,
+    'art_paths', (select jsonb_agg('/figurinhas/' || v_slug || '/' || s.slug || '.jpg' order by s.skin_order)
+                  from public.skins s)
+  );
+end;
+$$;
+
+create or replace function public.seed_edition(p_params jsonb)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_slug text := lower(p_params->>'slug');
+  v_id   int;
+  v_copias int;
+begin
+  perform private.require_admin();
+  if v_slug is null or v_slug !~ '^[a-z0-9][a-z0-9-]{2,19}$' then
+    raise exception 'slug invalido';
+  end if;
+
+  -- Secao 16: idempotente por slug. Se ja existe, aborta SEM escrever nada.
+  -- Nunca faz DELETE nem UPDATE em card_copies existentes.
+  if exists (select 1 from public.characters where slug = v_slug::extensions.citext) then
+    raise exception 'personagem % ja existe', v_slug;
+  end if;
+
+  insert into public.characters (slug, name, display_order, palette_primary, palette_accent)
+  values (v_slug::extensions.citext,
+          coalesce(p_params->>'name', initcap(v_slug)),
+          coalesce((p_params->>'display_order')::int,
+                   (select coalesce(max(display_order), 0) + 1 from public.characters)),
+          coalesce(p_params->>'palette_primary', '#555555'),
+          coalesce(p_params->>'palette_accent',  '#999999'))
+  returning id into v_id;
+
+  insert into public.card_types (character_id, tier, tier_order, skin, print_run, art_path, album_page)
+  select v_id, s.tier, t.tier_order, s.slug, t.print_run,
+         '/figurinhas/' || v_slug || '/' || s.slug || '.jpg', ap.id
+  from public.skins s
+  join public.tiers t on t.slug = s.tier
+  join public.album_pages ap on ap.slug = s.slug;
+
+  insert into public.card_copies (card_type_id, serial_number, verify_code)
+  select ct.id, g,
+         upper(substr(encode(extensions.digest(
+           'belesma-v1|' || v_slug || '|' || ct.skin || '|' || g::text, 'sha256'), 'hex'), 1, 10))
+  from public.card_types ct
+  cross join lateral generate_series(1, ct.print_run) g
+  where ct.character_id = v_id;
+
+  perform private.distribuir_selos(v_id);
+  perform private.reservar_diario(v_id, 500);
+
+  select count(*) into v_copias
+  from public.card_copies cc join public.card_types ct on ct.id = cc.card_type_id
+  where ct.character_id = v_id;
+
+  perform private.registrar('seed_edition', v_slug,
+    jsonb_build_object('character_id', v_id, 'copias', v_copias));
+
+  return jsonb_build_object('character_id', v_id, 'slug', v_slug, 'copias', v_copias,
+    'selos', (select to_jsonb(a) from public.seal_audit a where a.character_id = v_id));
+end;
+$$;
+
+-- ================================================================ zona de perigo
+-- Secao 18.2: nenhum reset apaga card_types nem characters. So posse.
+create or replace function private.devolver_ao_pool(p_owner uuid)
+returns int
+language plpgsql volatile
+set search_path = public, extensions, pg_temp
+as $$
+declare v_n int;
+begin
+  insert into public.copy_history (copy_id, from_player, to_player, kind)
+  select id, p_owner, null, 'admin_reset' from public.card_copies where owner_id = p_owner;
+
+  -- Forjada e supply paralelo: devolver ao pool colocaria carta forjada
+  -- dentro de pacote. Queima em vez de devolver.
+  update public.card_copies
+  set owner_id = null, claimed_at = null, burned = true
+  where owner_id = p_owner and origin = 'forge';
+
+  -- Puxada volta inteira: mantem id, serial, selo e damage_level.
+  -- first_discovered_* NAO e tocado - estreia mundial e historia, nao posse.
+  update public.card_copies
+  set owner_id = null, claimed_at = null
+  where owner_id = p_owner and origin = 'pull';
+  get diagnostics v_n = row_count;
+
+  update public.players
+  set showcase_1 = null, showcase_2 = null, showcase_3 = null
+  where id = p_owner;
+
+  return v_n;
+end;
+$$;
+
+create or replace function public.admin_reset_player_collection(p_nickname text)
+returns int
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_id uuid; v_n int;
+begin
+  perform private.require_admin();
+  select id into v_id from public.players where nickname = p_nickname::extensions.citext;
+  if v_id is null then raise exception 'jogador nao encontrado'; end if;
+
+  update public.trades set status = 'cancelled', resolved_at = now()
+  where status = 'pending' and (from_player = v_id or to_player = v_id);
+
+  v_n := private.devolver_ao_pool(v_id);
+  perform private.registrar('admin_reset_player_collection', p_nickname,
+    jsonb_build_object('devolvidas', v_n));
+  return v_n;
+end;
+$$;
+
+create or replace function public.admin_reset_all_collections(p_confirmacao text)
+returns int
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_n int := 0; v_p record;
+begin
+  perform private.require_admin();
+  if p_confirmacao <> 'RESETAR' then
+    raise exception 'confirmacao invalida: digite RESETAR';
+  end if;
+
+  update public.trades set status = 'cancelled', resolved_at = now() where status = 'pending';
+  for v_p in select id from public.players loop
+    v_n := v_n + private.devolver_ao_pool(v_p.id);
+  end loop;
+
+  perform private.registrar('admin_reset_all_collections', 'todos',
+    jsonb_build_object('devolvidas', v_n));
+  return v_n;
+end;
+$$;
+
+create or replace function public.admin_delete_player(p_nickname text)
+returns int
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_id uuid; v_n int;
+begin
+  perform private.require_admin();
+  select id into v_id from public.players where nickname = p_nickname::extensions.citext;
+  if v_id is null then raise exception 'jogador nao encontrado'; end if;
+  if v_id = auth.uid() then raise exception 'nao da para apagar a si mesmo'; end if;
+
+  update public.trades set status = 'cancelled', resolved_at = now()
+  where status = 'pending' and (from_player = v_id or to_player = v_id);
+  v_n := private.devolver_ao_pool(v_id);
+
+  perform private.registrar('admin_delete_player', p_nickname,
+    jsonb_build_object('devolvidas', v_n, 'player_id', v_id));
+
+  -- players.id referencia auth.users on delete cascade
+  delete from auth.users where id = v_id;
+  return v_n;
+end;
+$$;
+
+-- ================================================================ permissoes
+do $$
+declare f text;
+begin
+  foreach f in array array[
+    'admin_jogadores()', 'grant_packs(text,text,int)', 'admin_reset_password(text,text)',
+    'admin_reset_daily_cooldown(text)', 'admin_set_pack_config(jsonb)',
+    'admin_set_economy_config(jsonb)', 'top_up_daily_reserve(int)', 'admin_stock_report()',
+    'admin_missing_art()', 'seed_edition_dry_run(jsonb)', 'seed_edition(jsonb)',
+    'admin_reset_player_collection(text)', 'admin_reset_all_collections(text)',
+    'admin_delete_player(text)'
+  ] loop
+    execute format('revoke all on function public.%s from public, anon', f);
+    execute format('grant execute on function public.%s to authenticated', f);
+    execute format('alter function public.%s owner to postgres', f);
+  end loop;
+end $$;
+
+
+-- ===== 20260822110000_mudar_nickname.sql =====
+-- BELESMA figurinhas - troca de apelido
+--
+-- A spec secao 10 diz "apelido unico e travado". Isto afrouxa o "travado",
+-- mas mantem o "unico" no sentido forte: um apelido que ja foi de alguem
+-- nunca vai para outra pessoa.
+--
+-- Por que isso importa: a figurinha exportada grava o apelido para dar
+-- credito (secao 14). Se a "ana" virasse "bia" e outra pessoa pudesse
+-- assumir "ana", todo arquivo antigo passaria a creditar a pessoa errada.
+-- O historico abaixo impede exatamente isso.
+--
+-- O apelido tambem e a identidade de login: o e-mail interno e
+-- <apelido>@belesma.local. Trocar um sem trocar o outro deixaria o jogador
+-- sem conseguir entrar. As duas coisas mudam na mesma transacao.
+
+create table if not exists public.nickname_history (
+  id          bigserial primary key,
+  player_id   uuid not null references public.players(id) on delete cascade,
+  nickname    extensions.citext not null,
+  usado_ate   timestamptz not null default now()
+);
+create unique index if not exists nickname_history_unico
+  on public.nickname_history (nickname, player_id);
+create index if not exists nickname_history_nick on public.nickname_history (nickname);
+
+alter table public.nickname_history enable row level security;
+-- o historico e publico: e ele que permite conferir credito de figurinha velha
+drop policy if exists nickname_history_leitura on public.nickname_history;
+create policy nickname_history_leitura on public.nickname_history
+  for select to anon, authenticated using (true);
+grant select on public.nickname_history to anon, authenticated;
+grant all on public.nickname_history to service_role;
+grant usage, select on sequence public.nickname_history_id_seq to service_role;
+
+-- ---------------------------------------------------------------- disponibilidade
+-- Agora tambem recusa apelido que ja foi de OUTRA pessoa. Retomar um apelido
+-- que ja foi seu continua liberado.
+create or replace function public.nickname_disponivel(p_nickname text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+  -- Apelido EM USO nunca esta disponivel, nem para o proprio dono: quem
+  -- digita o proprio apelido no formulario de troca recebe "ja esta em uso",
+  -- que e verdade. A excecao vale so para o HISTORICO - retomar um apelido
+  -- que ja foi seu continua liberado.
+  select not exists (
+    select 1 from public.players
+    where nickname = p_nickname::extensions.citext
+  ) and not exists (
+    select 1 from public.nickname_history
+    where nickname = p_nickname::extensions.citext
+      and player_id is distinct from auth.uid()
+  );
+$$;
+
+-- ---------------------------------------------------------------- troca
+create or replace function public.mudar_nickname(p_novo text)
+returns public.players
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid    uuid := auth.uid();
+  v_atual  extensions.citext;
+  v_row    public.players;
+begin
+  if v_uid is null then
+    raise exception 'precisa estar logado' using errcode = '42501';
+  end if;
+
+  if p_novo !~ '^[a-z0-9][a-z0-9_-]{2,19}$' then
+    raise exception 'apelido invalido: 3 a 20 caracteres, minusculas, numeros, - e _';
+  end if;
+
+  select nickname into v_atual from public.players where id = v_uid for update;
+  if v_atual is null then raise exception 'jogador nao encontrado'; end if;
+  if v_atual = p_novo::extensions.citext then
+    raise exception 'esse ja e o seu apelido';
+  end if;
+
+  if exists (select 1 from public.players
+             where nickname = p_novo::extensions.citext and id <> v_uid) then
+    raise exception 'esse apelido ja esta em uso';
+  end if;
+
+  if exists (select 1 from public.nickname_history
+             where nickname = p_novo::extensions.citext and player_id <> v_uid) then
+    raise exception 'esse apelido ja foi de outra pessoa e nao pode ser reusado';
+  end if;
+
+  -- guarda o que estava em uso antes de sobrescrever
+  insert into public.nickname_history (player_id, nickname)
+  values (v_uid, v_atual)
+  on conflict (nickname, player_id) do update set usado_ate = now();
+
+  update public.players set nickname = p_novo::extensions.citext
+  where id = v_uid
+  returning * into v_row;
+
+  -- o login e por <apelido>@belesma.local: sem isto o jogador nao entra mais
+  update auth.users
+  set email = p_novo || '@belesma.local',
+      updated_at = now()
+  where id = v_uid;
+
+  return v_row;
+exception
+  when unique_violation then
+    raise exception 'esse apelido ja esta em uso';
+end;
+$$;
+
+revoke all on function public.mudar_nickname(text) from public, anon;
+grant execute on function public.mudar_nickname(text) to authenticated;
+alter function public.mudar_nickname(text) owner to postgres;
+alter function public.nickname_disponivel(text) owner to postgres;
+
+
+-- ===== 20260822120000_rpc_social.sql =====
+-- BELESMA figurinhas - Fase 5: trocas, indice global, vitrine e ranking
+-- (spec secoes 9 e 11)
+
+-- ================================================================ trocas
+-- Secao 19.6 ja previa cada lado oferecendo copia OU baba. A interface da
+-- Fase 5 so troca carta por carta, mas a RPC ja fecha o contrato inteiro -
+-- assim a Fase 6 liga a moeda sem reescrever a transacao.
+create or replace function public.propose_trade(
+  p_offered_copy_id   bigint default null,
+  p_offered_baba      int    default 0,
+  p_requested_copy_id bigint default null,
+  p_requested_baba    int    default 0
+)
+returns public.trades
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_outro uuid;
+  v_row   public.trades;
+begin
+  if v_uid is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+
+  -- o que eu ofereco tem que ser meu
+  if p_offered_copy_id is not null then
+    if not exists (select 1 from public.card_copies
+                   where id = p_offered_copy_id and owner_id = v_uid and not burned) then
+      raise exception 'essa copia nao e sua';
+    end if;
+  elsif p_offered_baba <= 0 then
+    raise exception 'ofereca uma copia ou um valor em baba';
+  else
+    if (select baba from public.players where id = v_uid) < p_offered_baba then
+      raise exception 'saldo insuficiente';
+    end if;
+  end if;
+
+  -- o que eu peco define com quem e a troca
+  if p_requested_copy_id is not null then
+    select owner_id into v_outro from public.card_copies
+    where id = p_requested_copy_id and not burned;
+    if v_outro is null then raise exception 'essa copia nao tem dono'; end if;
+  elsif p_requested_baba <= 0 then
+    raise exception 'peca uma copia ou um valor em baba';
+  else
+    raise exception 'para pedir baba, ofereca uma copia';   -- baba por baba e proibido
+  end if;
+
+  if v_outro = v_uid then raise exception 'nao da para trocar consigo mesmo'; end if;
+
+  insert into public.trades (from_player, to_player, offered_copy_id, offered_baba,
+                             requested_copy_id, requested_baba)
+  values (v_uid, v_outro, p_offered_copy_id, coalesce(p_offered_baba, 0),
+          p_requested_copy_id, coalesce(p_requested_baba, 0))
+  returning * into v_row;
+  return v_row;
+end;
+$$;
+
+-- Secao 11: revalida a posse das DUAS copias DENTRO da transacao. Uma
+-- proposta pode ficar dias parada e a carta ja ter mudado de dono.
+--
+-- Devolve jsonb, nao a linha, por um motivo concreto: RAISE faz ROLLBACK de
+-- tudo, inclusive do "update trades set cancelled" que marca a proposta
+-- furada. Entao os dois tipos de falha sao tratados diferente:
+--
+--   autorizacao / nao existe / ja resolvida  -> RAISE (nao ha o que gravar)
+--   revalidacao falhou (dono mudou, saldo)   -> CANCELA a proposta e devolve
+--                                               {ok:false, motivo}, para o
+--                                               cancelamento sobreviver ao
+--                                               commit
+create or replace function public.accept_trade(p_trade_id bigint)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid uuid := auth.uid();
+  t     public.trades;
+  v_de  uuid;
+  v_para uuid;
+
+  -- cancela a proposta e devolve o motivo, SEM raise, para o cancelamento
+  -- sobreviver ao commit
+  function_motivo text;
+begin
+  if v_uid is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+
+  -- FOR UPDATE: duas propostas com a mesma copia aceitas quase junto -
+  -- so uma passa (teste de aceitacao 7)
+  select * into t from public.trades where id = p_trade_id for update;
+  if t.id is null then raise exception 'proposta nao existe'; end if;
+  if t.to_player <> v_uid then raise exception 'essa proposta nao e sua' using errcode = '42501'; end if;
+  if t.status <> 'pending' then raise exception 'essa proposta ja foi resolvida'; end if;
+
+  -- ---------------------------------------------------------- revalidacao
+  if t.offered_copy_id is not null then
+    select owner_id into v_de from public.card_copies
+    where id = t.offered_copy_id and not burned for update;
+    if v_de is distinct from t.from_player then
+      function_motivo := 'a carta oferecida mudou de dono desde a proposta';
+    end if;
+  end if;
+
+  if t.requested_copy_id is not null then
+    select owner_id into v_para from public.card_copies
+    where id = t.requested_copy_id and not burned for update;
+    if v_para is distinct from t.to_player then
+      function_motivo := 'a carta pedida mudou de dono desde a proposta';
+    end if;
+  end if;
+
+  if function_motivo is null and t.offered_baba > 0
+     and (select baba from public.players where id = t.from_player) < t.offered_baba then
+    function_motivo := 'quem propos nao tem mais saldo para cobrir a oferta';
+  end if;
+  if function_motivo is null and t.requested_baba > 0
+     and (select baba from public.players where id = t.to_player) < t.requested_baba then
+    function_motivo := 'voce nao tem mais saldo para cobrir o pedido';
+  end if;
+
+  if function_motivo is not null then
+    update public.trades set status = 'cancelled', resolved_at = now() where id = t.id;
+    return jsonb_build_object('ok', false, 'motivo', function_motivo, 'trade_id', t.id);
+  end if;
+
+  -- ---------------------------------------------------------- execucao
+  if t.offered_copy_id is not null then
+    update public.card_copies set owner_id = t.to_player, claimed_at = now()
+    where id = t.offered_copy_id;
+    insert into public.copy_history (copy_id, from_player, to_player, kind)
+    values (t.offered_copy_id, t.from_player, t.to_player, 'trade');
+  end if;
+
+  if t.requested_copy_id is not null then
+    update public.card_copies set owner_id = t.from_player, claimed_at = now()
+    where id = t.requested_copy_id;
+    insert into public.copy_history (copy_id, from_player, to_player, kind)
+    values (t.requested_copy_id, t.to_player, t.from_player, 'trade');
+  end if;
+
+  if t.offered_baba > 0 then
+    update public.players set baba = baba - t.offered_baba where id = t.from_player;
+    update public.players set baba = baba + t.offered_baba where id = t.to_player;
+    insert into public.baba_log (player_id, delta, motivo, ref_id) values
+      (t.from_player, -t.offered_baba, 'troca', t.id::text),
+      (t.to_player,    t.offered_baba, 'troca', t.id::text);
+  end if;
+  if t.requested_baba > 0 then
+    update public.players set baba = baba - t.requested_baba where id = t.to_player;
+    update public.players set baba = baba + t.requested_baba where id = t.from_player;
+    insert into public.baba_log (player_id, delta, motivo, ref_id) values
+      (t.to_player,   -t.requested_baba, 'troca', t.id::text),
+      (t.from_player,  t.requested_baba, 'troca', t.id::text);
+  end if;
+
+  update public.trades set status = 'accepted', resolved_at = now() where id = t.id
+  returning * into t;
+
+  -- Secao 11: aceitar invalida as outras propostas que envolvam estas copias.
+  update public.trades set status = 'cancelled', resolved_at = now()
+  where status = 'pending' and id <> t.id
+    and (offered_copy_id   in (t.offered_copy_id, t.requested_copy_id)
+      or requested_copy_id in (t.offered_copy_id, t.requested_copy_id));
+
+  -- a vitrine nao pode apontar para carta que nao e mais sua
+  update public.players set
+    showcase_1 = case when showcase_1 in (t.offered_copy_id, t.requested_copy_id) then null else showcase_1 end,
+    showcase_2 = case when showcase_2 in (t.offered_copy_id, t.requested_copy_id) then null else showcase_2 end,
+    showcase_3 = case when showcase_3 in (t.offered_copy_id, t.requested_copy_id) then null else showcase_3 end
+  where id in (t.from_player, t.to_player);
+
+  return jsonb_build_object('ok', true, 'trade_id', t.id);
+end;
+$$;
+
+create or replace function public.decline_trade(p_trade_id bigint)
+returns void
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_uid uuid := auth.uid(); v_n int;
+begin
+  update public.trades set status = 'declined', resolved_at = now()
+  where id = p_trade_id and to_player = v_uid and status = 'pending';
+  get diagnostics v_n = row_count;
+  if v_n = 0 then raise exception 'nada a recusar aqui'; end if;
+end;
+$$;
+
+create or replace function public.cancel_trade(p_trade_id bigint)
+returns void
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_uid uuid := auth.uid(); v_n int;
+begin
+  update public.trades set status = 'cancelled', resolved_at = now()
+  where id = p_trade_id and from_player = v_uid and status = 'pending';
+  get diagnostics v_n = row_count;
+  if v_n = 0 then raise exception 'nada a cancelar aqui'; end if;
+end;
+$$;
+
+-- ================================================================ vitrine
+create or replace function public.set_showcase(p_copy_ids bigint[])
+returns public.players
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_uid uuid := auth.uid(); v_row public.players; v_id bigint;
+begin
+  if v_uid is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+  if array_length(p_copy_ids, 1) > 3 then raise exception 'a vitrine cabe 3'; end if;
+
+  foreach v_id in array coalesce(p_copy_ids, '{}'::bigint[]) loop
+    if not exists (select 1 from public.card_copies
+                   where id = v_id and owner_id = v_uid and not burned) then
+      raise exception 'so da para expor copia sua';
+    end if;
+  end loop;
+
+  update public.players set
+    showcase_1 = p_copy_ids[1], showcase_2 = p_copy_ids[2], showcase_3 = p_copy_ids[3]
+  where id = v_uid
+  returning * into v_row;
+  return v_row;
+end;
+$$;
+
+-- ================================================================ indice global
+-- Secao 11: conta PERSONAGENS descobertos, com as skins dentro. So conta
+-- origin='pull' - forjada nao descobre nada (secao 7).
+create or replace function public.global_index()
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v jsonb;
+begin
+  with tipos as (
+    select ct.id, ct.character_id, ct.skin, ct.tier, ct.tier_order, ct.print_run,
+           count(*) filter (where cc.owner_id is not null and cc.origin = 'pull') as distribuidas,
+           bool_or(cc.first_discovered_at is not null and cc.origin = 'pull')     as descoberto,
+           min(cc.first_discovered_at) filter (where cc.origin = 'pull')          as em,
+           (select p.nickname from public.card_copies c2
+            join public.players p on p.id = c2.first_discovered_by
+            where c2.card_type_id = ct.id and c2.origin = 'pull'
+              and c2.first_discovered_at is not null
+            order by c2.first_discovered_at limit 1)                              as primeiro
+    from public.card_types ct
+    left join public.card_copies cc on cc.card_type_id = ct.id
+    group by ct.id
+  )
+  select jsonb_build_object(
+    'personagens', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'slug', ch.slug, 'nome', ch.name, 'display_order', ch.display_order,
+        'descoberto', (select bool_or(t.descoberto) from tipos t where t.character_id = ch.id),
+        'tipos', (select jsonb_agg(jsonb_build_object(
+                    'skin', t.skin, 'tier', t.tier, 'tier_order', t.tier_order,
+                    'print_run', t.print_run, 'distribuidas', t.distribuidas,
+                    'descoberto', t.descoberto, 'primeiro', t.primeiro, 'em', t.em)
+                    order by t.tier_order, t.skin)
+                  from tipos t where t.character_id = ch.id)
+      ) order by ch.display_order)
+      from public.characters ch), '[]'::jsonb),
+    'descobertos', (select count(distinct t.character_id) from tipos t where t.descoberto),
+    'total_personagens', (select count(*) from public.characters)
+  ) into v;
+  return v;
+end;
+$$;
+
+-- ================================================================ par de aura
+-- Secao 11: aura-branca E aura-preta do MESMO personagem. O evento mais raro
+-- do jogo — e publico, o grupo inteiro vê.
+create or replace function public.pares_de_aura()
+returns jsonb
+language sql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'nickname', p.nickname, 'personagem', ch.slug, 'nome', ch.name,
+    'em', x.em) order by x.em), '[]'::jsonb)
+  from (
+    select cc.owner_id, ct.character_id, max(cc.claimed_at) as em
+    from public.card_copies cc
+    join public.card_types ct on ct.id = cc.card_type_id
+    where cc.owner_id is not null and ct.skin in ('aura-branca','aura-preta')
+    group by cc.owner_id, ct.character_id
+    having count(distinct ct.skin) = 2
+  ) x
+  join public.players p on p.id = x.owner_id
+  join public.characters ch on ch.id = x.character_id;
+$$;
+
+-- ================================================================ caçada de serial
+-- Secao 11: ranking publico de menores seriais e contagem de selos.
+create or replace function public.ranking_serial()
+returns jsonb
+language sql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'nickname', p.nickname,
+    'copias', x.copias,
+    'selos', x.selos,
+    'melhor_serial', x.melhor_serial,
+    'melhor_skin', x.melhor_skin,
+    'melhor_personagem', x.melhor_personagem,
+    'melhor_print_run', x.melhor_print_run,
+    'unos', x.unos
+  ) order by x.selos desc, x.melhor_serial), '[]'::jsonb)
+  from (
+    select cc.owner_id,
+           count(*) as copias,
+           count(*) filter (where cc.seal <> 'none') as selos,
+           count(*) filter (where cc.serial_number = 1) as unos,
+           min(cc.serial_number) as melhor_serial,
+           (array_agg(ct.skin order by cc.serial_number))[1]  as melhor_skin,
+           (array_agg(ch.slug order by cc.serial_number))[1]  as melhor_personagem,
+           (array_agg(ct.print_run order by cc.serial_number))[1] as melhor_print_run
+    from public.card_copies cc
+    join public.card_types ct on ct.id = cc.card_type_id
+    join public.characters ch on ch.id = ct.character_id
+    where cc.owner_id is not null and cc.origin = 'pull'
+    group by cc.owner_id
+  ) x
+  join public.players p on p.id = x.owner_id;
+$$;
+
+-- ================================================================ realtime
+-- Secao 11: as propostas chegam sem recarregar. O Realtime respeita a RLS,
+-- entao cada jogador so recebe evento de troca em que ele e parte.
+do $$ begin
+  alter publication supabase_realtime add table public.trades;
+exception when duplicate_object then null; when undefined_object then null; end $$;
+
+alter table public.trades replica identity full;
+
+-- ================================================================ permissoes
+do $$
+declare f text;
+begin
+  foreach f in array array[
+    'propose_trade(bigint,int,bigint,int)', 'accept_trade(bigint)',
+    'decline_trade(bigint)', 'cancel_trade(bigint)', 'set_showcase(bigint[])'
+  ] loop
+    execute format('revoke all on function public.%s from public, anon', f);
+    execute format('grant execute on function public.%s to authenticated', f);
+    execute format('alter function public.%s owner to postgres', f);
+  end loop;
+
+  -- indice, pares de aura e ranking sao PUBLICOS (secao 11)
+  foreach f in array array['global_index()', 'pares_de_aura()', 'ranking_serial()'] loop
+    execute format('revoke all on function public.%s from public', f);
+    execute format('grant execute on function public.%s to anon, authenticated', f);
+    execute format('alter function public.%s owner to postgres', f);
+  end loop;
+end $$;
+
+
+-- ===== 20260822130000_album_colagem.sql =====
+-- BELESMA figurinhas - colar figurinha no album
+--
+-- Ate aqui o album se preenchia sozinho: teve a copia, apareceu no slot.
+-- Agora o gesto existe - o jogador arrasta a figurinha do deck e COLA.
+--
+-- Isso precisa persistir no banco. A spec secao 2 e explicita: nunca usar
+-- localStorage como fonte de verdade.
+
+create table if not exists public.album_colagem (
+  player_id    uuid not null references public.players(id) on delete cascade,
+  card_type_id int  not null references public.card_types(id),
+  copy_id      bigint not null references public.card_copies(id),
+  colada_em    timestamptz not null default now(),
+  primary key (player_id, card_type_id)
+);
+create index if not exists album_colagem_copy on public.album_colagem(copy_id);
+
+alter table public.album_colagem enable row level security;
+drop policy if exists album_colagem_leitura on public.album_colagem;
+-- publica: o album de cada um pode ser visto pelo grupo
+create policy album_colagem_leitura on public.album_colagem
+  for select to anon, authenticated using (true);
+grant select on public.album_colagem to anon, authenticated;
+grant all on public.album_colagem to service_role;
+
+-- ---------------------------------------------------------------- colar
+create or replace function public.colar(p_copy_id bigint)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid  uuid := auth.uid();
+  v_tipo int;
+begin
+  if v_uid is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+
+  select card_type_id into v_tipo
+  from public.card_copies
+  where id = p_copy_id and owner_id = v_uid and not burned;
+  if v_tipo is null then raise exception 'essa copia nao e sua'; end if;
+
+  insert into public.album_colagem (player_id, card_type_id, copy_id)
+  values (v_uid, v_tipo, p_copy_id)
+  on conflict (player_id, card_type_id) do update set copy_id = excluded.copy_id,
+                                                      colada_em = now();
+
+  return jsonb_build_object('card_type_id', v_tipo, 'copy_id', p_copy_id);
+end;
+$$;
+
+-- ---------------------------------------------------------------- descolar
+create or replace function public.descolar(p_card_type_id int)
+returns void
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+begin
+  delete from public.album_colagem
+  where player_id = auth.uid() and card_type_id = p_card_type_id;
+end;
+$$;
+
+-- ---------------------------------------------------------------- colar tudo
+-- Quem ja tem acervo grande nao vai arrastar 80 figurinhas na mao.
+create or replace function public.colar_tudo()
+returns int
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_uid uuid := auth.uid(); v_n int;
+begin
+  if v_uid is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+
+  insert into public.album_colagem (player_id, card_type_id, copy_id)
+  select v_uid, cc.card_type_id, min(cc.id)
+  from public.card_copies cc
+  where cc.owner_id = v_uid and not cc.burned
+  group by cc.card_type_id
+  on conflict (player_id, card_type_id) do nothing;
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+-- A colagem NAO e limpa quando a copia sai numa troca: a consulta do album
+-- confere a posse na hora, entao o slot volta a ficar vazio sozinho. Limpar
+-- aqui tambem evita a linha orfa ficar para sempre.
+create or replace function public.accept_trade(p_trade_id bigint)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid uuid := auth.uid();
+  t     public.trades;
+  v_de  uuid;
+  v_para uuid;
+  function_motivo text;
+begin
+  if v_uid is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+
+  select * into t from public.trades where id = p_trade_id for update;
+  if t.id is null then raise exception 'proposta nao existe'; end if;
+  if t.to_player <> v_uid then raise exception 'essa proposta nao e sua' using errcode = '42501'; end if;
+  if t.status <> 'pending' then raise exception 'essa proposta ja foi resolvida'; end if;
+
+  if t.offered_copy_id is not null then
+    select owner_id into v_de from public.card_copies
+    where id = t.offered_copy_id and not burned for update;
+    if v_de is distinct from t.from_player then
+      function_motivo := 'a carta oferecida mudou de dono desde a proposta';
+    end if;
+  end if;
+
+  if t.requested_copy_id is not null then
+    select owner_id into v_para from public.card_copies
+    where id = t.requested_copy_id and not burned for update;
+    if v_para is distinct from t.to_player then
+      function_motivo := 'a carta pedida mudou de dono desde a proposta';
+    end if;
+  end if;
+
+  if function_motivo is null and t.offered_baba > 0
+     and (select baba from public.players where id = t.from_player) < t.offered_baba then
+    function_motivo := 'quem propos nao tem mais saldo para cobrir a oferta';
+  end if;
+  if function_motivo is null and t.requested_baba > 0
+     and (select baba from public.players where id = t.to_player) < t.requested_baba then
+    function_motivo := 'voce nao tem mais saldo para cobrir o pedido';
+  end if;
+
+  if function_motivo is not null then
+    update public.trades set status = 'cancelled', resolved_at = now() where id = t.id;
+    return jsonb_build_object('ok', false, 'motivo', function_motivo, 'trade_id', t.id);
+  end if;
+
+  if t.offered_copy_id is not null then
+    update public.card_copies set owner_id = t.to_player, claimed_at = now()
+    where id = t.offered_copy_id;
+    insert into public.copy_history (copy_id, from_player, to_player, kind)
+    values (t.offered_copy_id, t.from_player, t.to_player, 'trade');
+  end if;
+
+  if t.requested_copy_id is not null then
+    update public.card_copies set owner_id = t.from_player, claimed_at = now()
+    where id = t.requested_copy_id;
+    insert into public.copy_history (copy_id, from_player, to_player, kind)
+    values (t.requested_copy_id, t.to_player, t.from_player, 'trade');
+  end if;
+
+  if t.offered_baba > 0 then
+    update public.players set baba = baba - t.offered_baba where id = t.from_player;
+    update public.players set baba = baba + t.offered_baba where id = t.to_player;
+    insert into public.baba_log (player_id, delta, motivo, ref_id) values
+      (t.from_player, -t.offered_baba, 'troca', t.id::text),
+      (t.to_player,    t.offered_baba, 'troca', t.id::text);
+  end if;
+  if t.requested_baba > 0 then
+    update public.players set baba = baba - t.requested_baba where id = t.to_player;
+    update public.players set baba = baba + t.requested_baba where id = t.from_player;
+    insert into public.baba_log (player_id, delta, motivo, ref_id) values
+      (t.to_player,   -t.requested_baba, 'troca', t.id::text),
+      (t.from_player,  t.requested_baba, 'troca', t.id::text);
+  end if;
+
+  update public.trades set status = 'accepted', resolved_at = now() where id = t.id
+  returning * into t;
+
+  update public.trades set status = 'cancelled', resolved_at = now()
+  where status = 'pending' and id <> t.id
+    and (offered_copy_id   in (t.offered_copy_id, t.requested_copy_id)
+      or requested_copy_id in (t.offered_copy_id, t.requested_copy_id));
+
+  update public.players set
+    showcase_1 = case when showcase_1 in (t.offered_copy_id, t.requested_copy_id) then null else showcase_1 end,
+    showcase_2 = case when showcase_2 in (t.offered_copy_id, t.requested_copy_id) then null else showcase_2 end,
+    showcase_3 = case when showcase_3 in (t.offered_copy_id, t.requested_copy_id) then null else showcase_3 end
+  where id in (t.from_player, t.to_player);
+
+  -- a carta descolou do album de quem a entregou
+  delete from public.album_colagem
+  where copy_id in (t.offered_copy_id, t.requested_copy_id);
+
+  return jsonb_build_object('ok', true, 'trade_id', t.id);
+end;
+$$;
+
+do $$
+declare f text;
+begin
+  foreach f in array array['colar(bigint)', 'descolar(int)', 'colar_tudo()'] loop
+    execute format('revoke all on function public.%s from public, anon', f);
+    execute format('grant execute on function public.%s to authenticated', f);
+    execute format('alter function public.%s owner to postgres', f);
+  end loop;
+  execute 'alter function public.accept_trade(bigint) owner to postgres';
+  execute 'grant execute on function public.accept_trade(bigint) to authenticated';
+end $$;
+
+
+-- ===== 20260822140000_auditoria_garantido.sql =====
+-- BELESMA figurinhas - torna a regra dura de diamante/prisma AUDITAVEL
+--
+-- A spec secao 8 diz: "diamante e prisma nunca saem em slot garantido - nem
+-- na promocao, nem no pacote quente, nem no pity. So do slot de hit de
+-- pacote Comum, sorteado livre pela tabela."
+--
+-- Ate agora a auditoria guardava se a carta veio da tabela de hit, mas nao
+-- se o SLOT era garantido. Sem isso nao da para conferir a regra: um pacote
+-- Comum com uma promocao pode legitimamente trazer um diamante no slot de
+-- hit NATURAL, e de fora os dois casos pareciam iguais.
+--
+-- Foi exatamente isso que deu falso positivo no teste da Fase 2.
+
+alter table public.pack_opening_cards
+  add column if not exists garantido boolean not null default false;
+
+comment on column public.pack_opening_cards.garantido is
+  'Slot garantido (promocao, pacote quente ou pity). Nestes, diamante e '
+  'prisma sao proibidos pela regra dura da secao 8.';
+
+
+-- ===== 20260822150000_fase6_economia.sql =====
+-- BELESMA figurinhas - Fase 6: forja, moeda BABA, loja e verificacao publica
+-- (spec secoes 7, 14 e 19)
+
+-- ================================================================ serial da forjada
+-- A forjada e SUPPLY PARALELO: nao consome serial da tiragem original
+-- (spec §7). Ate agora serial_number era NOT NULL, o que obrigaria a forjada
+-- a ocupar um numero da tiragem - exatamente o que a spec proibe.
+--
+-- Agora: pull tem serial e nao tem forge_index; forge tem forge_index e nao
+-- tem serial. O unique (card_type_id, serial_number) continua valendo para
+-- as puxadas, porque NULL nao conflita com NULL no Postgres.
+alter table public.card_copies alter column serial_number drop not null;
+
+do $$ begin
+  alter table public.card_copies drop constraint card_copies_forge_index_coerente;
+exception when undefined_object then null; end $$;
+
+-- idempotente: o harness da Fase 1 roda as migracoes duas vezes de proposito
+do $$ begin
+  alter table public.card_copies
+    add constraint card_copies_procedencia_coerente check (
+      (origin = 'pull'  and serial_number is not null and forge_index is null) or
+      (origin = 'forge' and serial_number is null     and forge_index is not null)
+    );
+exception when duplicate_object then null; end $$;
+
+create unique index if not exists card_copies_forge_index_unico
+  on public.card_copies (card_type_id, forge_index) where origin = 'forge';
+
+-- ================================================================ helpers
+create or replace function private.preco(p_chave text)
+returns numeric
+language sql stable
+set search_path = public, extensions, pg_temp
+as $$ select valor from public.economy_config where chave = p_chave $$;
+
+-- Todo credito e debito passa por aqui, e o extrato e gravado na MESMA
+-- transacao que altera o saldo (spec §19.1).
+create or replace function private.mover_baba(
+  p_player uuid, p_delta int, p_motivo text, p_ref text default null)
+returns int
+language plpgsql volatile
+set search_path = public, extensions, pg_temp
+as $$
+declare v_novo int;
+begin
+  update public.players set baba = baba + p_delta
+  where id = p_player
+  returning baba into v_novo;
+
+  if v_novo is null then raise exception 'jogador nao encontrado'; end if;
+
+  insert into public.baba_log (player_id, delta, motivo, ref_id)
+  values (p_player, p_delta, p_motivo, p_ref);
+  return v_novo;
+end;
+$$;
+
+-- ================================================================ forja
+-- Spec §7. Consome 5 copias do MESMO tier, de personagens e skins quaisquer,
+-- e devolve 1 do tier imediatamente acima.
+create or replace function public.forge(p_copy_ids bigint[])
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid    uuid := auth.uid();
+  v_tier   text;
+  v_ordem  smallint;
+  v_acima  text;
+  v_n      int;
+  v_tipo   int;
+  v_idx    int;
+  v_nova   bigint;
+begin
+  if v_uid is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+  if array_length(p_copy_ids, 1) <> 5 then raise exception 'a forja consome exatamente 5'; end if;
+  if (select count(distinct x) from unnest(p_copy_ids) x) <> 5 then
+    raise exception 'as 5 precisam ser copias diferentes';
+  end if;
+
+  -- trava as 5 e confere posse, tier unico e que nenhuma esta em troca aberta
+  select count(*), min(ct.tier), min(t.tier_order)
+    into v_n, v_tier, v_ordem
+  from public.card_copies cc
+  join public.card_types ct on ct.id = cc.card_type_id
+  join public.tiers t on t.slug = ct.tier
+  where cc.id = any(p_copy_ids) and cc.owner_id = v_uid and not cc.burned;
+
+  if v_n <> 5 then raise exception 'alguma dessas copias nao e sua'; end if;
+
+  if (select count(distinct ct.tier) from public.card_copies cc
+      join public.card_types ct on ct.id = cc.card_type_id
+      where cc.id = any(p_copy_ids)) <> 1 then
+    raise exception 'as 5 precisam ser do mesmo tier';
+  end if;
+
+  if exists (select 1 from public.trades
+             where status = 'pending'
+               and (offered_copy_id = any(p_copy_ids) or requested_copy_id = any(p_copy_ids))) then
+    raise exception 'uma dessas copias esta em proposta de troca aberta';
+  end if;
+
+  -- teto: a forja so produz ate mitica (spec §7)
+  select slug into v_acima from public.tiers where tier_order = v_ordem + 1;
+  if v_acima is null then raise exception 'nao existe tier acima de %', v_tier; end if;
+  if not (select forjavel from public.tiers where slug = v_tier) then
+    raise exception 'tier % nao e forjavel', v_tier;
+  end if;
+
+  -- sorteia o card_type de destino dentro do tier acima
+  select ct.id into v_tipo
+  from public.card_types ct where ct.tier = v_acima
+  order by extensions.gen_random_bytes(8) limit 1;
+  if v_tipo is null then raise exception 'sem tipo no tier %', v_acima; end if;
+
+  -- as 5 saem de circulacao PARA SEMPRE: nao voltam ao pool de sorteio
+  insert into public.copy_history (copy_id, from_player, to_player, kind)
+  select id, v_uid, null, 'forge' from public.card_copies where id = any(p_copy_ids);
+
+  update public.card_copies
+  set owner_id = null, claimed_at = null, burned = true
+  where id = any(p_copy_ids);
+
+  delete from public.album_colagem where copy_id = any(p_copy_ids);
+  update public.players set
+    showcase_1 = case when showcase_1 = any(p_copy_ids) then null else showcase_1 end,
+    showcase_2 = case when showcase_2 = any(p_copy_ids) then null else showcase_2 end,
+    showcase_3 = case when showcase_3 = any(p_copy_ids) then null else showcase_3 end
+  where id = v_uid;
+
+  -- forge_index sequencial por card_type; serial fica NULL (supply paralelo)
+  select coalesce(max(forge_index), 0) + 1 into v_idx
+  from public.card_copies where card_type_id = v_tipo and origin = 'forge';
+
+  insert into public.card_copies (card_type_id, serial_number, origin, forge_index,
+                                  owner_id, claimed_at, seal, verify_code)
+  values (v_tipo, null, 'forge', v_idx, v_uid, now(), 'none',
+          upper(substr(encode(extensions.digest(
+            'forja|' || v_tipo::text || '|' || v_idx::text, 'sha256'), 'hex'), 1, 10)))
+  returning id into v_nova;
+
+  insert into public.copy_history (copy_id, from_player, to_player, kind)
+  values (v_nova, null, v_uid, 'forge');
+
+  return jsonb_build_object(
+    'copy_id', v_nova, 'card_type_id', v_tipo, 'forge_index', v_idx,
+    'tier', v_acima, 'queimadas', 5);
+end;
+$$;
+
+-- ================================================================ vender
+-- Spec §19.4.
+create or replace function public.vender(p_copy_id bigint)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  c       record;
+  v_valor numeric;
+  v_saldo int;
+begin
+  if v_uid is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+
+  select cc.id, cc.card_type_id, cc.seal, cc.origin, cc.damage_level, cc.owner_id,
+         ct.tier, t.vendavel
+    into c
+  from public.card_copies cc
+  join public.card_types ct on ct.id = cc.card_type_id
+  join public.tiers t on t.slug = ct.tier
+  where cc.id = p_copy_id and not cc.burned
+  for update of cc;
+
+  if c.id is null or c.owner_id <> v_uid then raise exception 'essa copia nao e sua'; end if;
+
+  -- "prisma nao vende" e uma FLAG, nao uma chave ausente na tabela de precos
+  if not c.vendavel then raise exception 'figurinha % nao pode ser vendida', c.tier; end if;
+  if c.seal <> 'none' then raise exception 'figurinha selada nao se vende'; end if;
+
+  if (select count(*) from public.card_copies
+      where owner_id = v_uid and card_type_id = c.card_type_id and not burned) < 2 then
+    raise exception 'essa e a sua ultima copia desse tipo';
+  end if;
+
+  if exists (select 1 from public.trades where status = 'pending'
+             and (offered_copy_id = p_copy_id or requested_copy_id = p_copy_id)) then
+    raise exception 'essa copia esta em proposta de troca aberta';
+  end if;
+
+  v_valor := private.preco('venda_' || c.tier);
+  if v_valor is null then raise exception 'sem preco para o tier %', c.tier; end if;
+  if c.damage_level > 0 then v_valor := v_valor * private.preco('multiplicador_estragada'); end if;
+  if c.origin = 'forge'  then v_valor := v_valor * private.preco('multiplicador_forjada'); end if;
+  v_valor := floor(v_valor);
+
+  insert into public.copy_history (copy_id, from_player, to_player, kind)
+  values (p_copy_id, v_uid, null, 'sell');
+
+  if c.origin = 'forge' then
+    -- Forjada vendida e QUEIMADA, nao volta ao pool: supply paralelo nao pode
+    -- virar supply de pacote e contaminar o indice global (spec §19.4).
+    update public.card_copies
+    set owner_id = null, claimed_at = null, burned = true
+    where id = p_copy_id;
+  else
+    update public.card_copies
+    set owner_id = null, claimed_at = null,
+        damage_level = least(damage_level + 1, 3)
+    where id = p_copy_id;
+  end if;
+
+  delete from public.album_colagem where copy_id = p_copy_id;
+  update public.players set
+    showcase_1 = case when showcase_1 = p_copy_id then null else showcase_1 end,
+    showcase_2 = case when showcase_2 = p_copy_id then null else showcase_2 end,
+    showcase_3 = case when showcase_3 = p_copy_id then null else showcase_3 end
+  where id = v_uid;
+
+  v_saldo := private.mover_baba(v_uid, v_valor::int, 'venda', p_copy_id::text);
+  return jsonb_build_object('valor', v_valor, 'saldo', v_saldo, 'queimada', c.origin = 'forge');
+end;
+$$;
+
+-- ================================================================ restaurar
+-- Spec §19.2. Sempre deficitario de proposito: estragada vale 40% em
+-- QUALQUER nivel, entao o ganho e fixo e o custo cresce.
+create or replace function public.restaurar(p_copy_id bigint)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  c       record;
+  v_custo numeric;
+  v_saldo int;
+begin
+  if v_uid is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+
+  select cc.id, cc.damage_level, cc.owner_id, ct.tier into c
+  from public.card_copies cc
+  join public.card_types ct on ct.id = cc.card_type_id
+  where cc.id = p_copy_id and not cc.burned
+  for update of cc;
+
+  if c.id is null or c.owner_id <> v_uid then raise exception 'essa copia nao e sua'; end if;
+  if c.damage_level = 0 then raise exception 'essa figurinha nao esta estragada'; end if;
+
+  v_custo := floor(coalesce(private.preco('venda_' || c.tier), 0)
+                   * private.preco('restauro_mult_' || c.damage_level::text));
+  if v_custo <= 0 then raise exception 'sem preco de restauro para o tier %', c.tier; end if;
+
+  if (select baba from public.players where id = v_uid) < v_custo then
+    raise exception 'saldo insuficiente: precisa de % baba', v_custo;
+  end if;
+
+  update public.card_copies set damage_level = 0 where id = p_copy_id;
+  v_saldo := private.mover_baba(v_uid, -v_custo::int, 'restauro', p_copy_id::text);
+  return jsonb_build_object('custo', v_custo, 'saldo', v_saldo);
+end;
+$$;
+
+-- ================================================================ loja
+-- Spec §19.5. Pacote comprado e pacote de ALLOTMENT: tira os slots base de
+-- fora da reserva do diario.
+create or replace function public.comprar_pacote(p_pack_type text, p_character_id int default null)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_preco numeric;
+  v_teto  int;
+  v_hoje  int;
+  v_saldo int;
+begin
+  if v_uid is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+  if p_pack_type not in ('comum','raro','ultra') then raise exception 'tipo de pacote invalido'; end if;
+
+  perform 1 from public.players where id = v_uid for update;
+
+  v_preco := private.preco('compra_' || p_pack_type);
+  if v_preco is null then raise exception 'sem preco para o pacote %', p_pack_type; end if;
+  if p_character_id is not null then
+    if not exists (select 1 from public.characters where id = p_character_id) then
+      raise exception 'personagem nao existe';
+    end if;
+    v_preco := v_preco * private.preco('dirigido_mult');
+  end if;
+
+  -- teto diario contado NO SERVIDOR, pela janela de 24h do extrato
+  v_teto := private.preco('teto_compra_dia')::int;
+  select count(*) into v_hoje from public.baba_log
+  where player_id = v_uid and motivo = 'compra' and created_at > now() - interval '24 hours';
+  if v_hoje >= v_teto then
+    raise exception 'voce ja comprou % pacotes nas ultimas 24h', v_teto;
+  end if;
+
+  if (select baba from public.players where id = v_uid) < v_preco then
+    raise exception 'saldo insuficiente: o pacote custa % baba', v_preco;
+  end if;
+
+  v_saldo := private.mover_baba(v_uid, -v_preco::int, 'compra', p_pack_type);
+
+  update public.players set
+    packs_common = packs_common + (case when p_pack_type = 'comum' then 1 else 0 end),
+    packs_rare   = packs_rare   + (case when p_pack_type = 'raro'  then 1 else 0 end),
+    packs_ultra  = packs_ultra  + (case when p_pack_type = 'ultra' then 1 else 0 end)
+  where id = v_uid;
+
+  return jsonb_build_object('pack_type', p_pack_type, 'preco', v_preco, 'saldo', v_saldo,
+                            'restantes_hoje', v_teto - v_hoje - 1);
+end;
+$$;
+
+-- ================================================================ bonus de album
+-- Spec §19.3: +150 por pagina completa, UMA VEZ por pagina, para sempre.
+create or replace function public.conferir_bonus_album()
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid  uuid := auth.uid();
+  v_val  int;
+  v_pago int := 0;
+  p      record;
+begin
+  if v_uid is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+  v_val := private.preco('bonus_pagina')::int;
+
+  for p in
+    select ap.id, ap.title
+    from public.album_pages ap
+    where ap.skin_filter is not null
+      and not exists (select 1 from public.album_page_rewards r
+                      where r.player_id = v_uid and r.album_page_id = ap.id)
+      -- pagina completa = todo card_type daquela skin esta colado
+      and not exists (
+        select 1 from public.card_types ct
+        where ct.skin = ap.skin_filter
+          and not exists (select 1 from public.album_colagem ac
+                          where ac.player_id = v_uid and ac.card_type_id = ct.id))
+  loop
+    insert into public.album_page_rewards (player_id, album_page_id) values (v_uid, p.id);
+    perform private.mover_baba(v_uid, v_val, 'pagina do album', p.title);
+    v_pago := v_pago + v_val;
+  end loop;
+
+  return jsonb_build_object('creditado', v_pago,
+    'saldo', (select baba from public.players where id = v_uid));
+end;
+$$;
+
+-- ================================================================ verify_copy
+-- Spec §14: rota publica /v/<codigo>, sem auth. Mostra o dono ATUAL.
+create or replace function public.verify_copy(p_codigo text)
+returns jsonb
+language sql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+  select jsonb_build_object(
+    'verify_code', cc.verify_code,
+    'personagem', ch.name,
+    'personagem_slug', ch.slug,
+    'skin', ct.skin,
+    'tier', ct.tier,
+    'print_run', ct.print_run,
+    'serial_number', cc.serial_number,
+    'origin', cc.origin,
+    'forge_index', cc.forge_index,
+    'seal', cc.seal,
+    'damage_level', cc.damage_level,
+    'dono', p.nickname,
+    'desde', cc.claimed_at,
+    'estreia_por', (select p2.nickname from public.players p2 where p2.id = cc.first_discovered_by),
+    'estreia_em', cc.first_discovered_at
+  )
+  from public.card_copies cc
+  join public.card_types ct on ct.id = cc.card_type_id
+  join public.characters ch on ch.id = ct.character_id
+  left join public.players p on p.id = cc.owner_id
+  where upper(cc.verify_code) = upper(p_codigo);
+$$;
+
+-- ================================================================ permissoes
+do $$
+declare f text;
+begin
+  foreach f in array array[
+    'forge(bigint[])', 'vender(bigint)', 'restaurar(bigint)',
+    'comprar_pacote(text,int)', 'conferir_bonus_album()'
+  ] loop
+    execute format('revoke all on function public.%s from public, anon', f);
+    execute format('grant execute on function public.%s to authenticated', f);
+    execute format('alter function public.%s owner to postgres', f);
+  end loop;
+
+  -- verify_copy e PUBLICA e sem auth (spec §9)
+  execute 'revoke all on function public.verify_copy(text) from public';
+  execute 'grant execute on function public.verify_copy(text) to anon, authenticated';
+  execute 'alter function public.verify_copy(text) owner to postgres';
+end $$;
+
+
+-- ===== 20260822160000_fase7_diario.sql =====
+-- BELESMA figurinhas - Fase 7: diario, streak de login e bonus de troca
+-- (spec secoes 8 e 19.3)
+
+-- ================================================================ claim_daily
+-- Spec §8: a cada 24h credita 2 Comuns + 1 Raro. A cada TERCEIRO resgate,
+-- credita tambem 1 Ultra.
+--
+-- O ciclo do Ultra conta RESGATES, nao calendario: quem pula um dia atrasa o
+-- ciclo, nao o perde.
+--
+-- Junto vem o login diario da §19.3: +30 baba, +100 extra no setimo dia de
+-- streak. O streak quebra se passar de 48h desde o ultimo resgate.
+create or replace function public.claim_daily()
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  p            public.players;
+  v_comuns     int;
+  v_raros      int;
+  v_ciclo      int;
+  v_ultra      boolean;
+  v_streak     int;
+  v_bonus      int;
+  v_extra      int := 0;
+  v_espera     interval;
+begin
+  if auth.uid() is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+
+  select * into p from public.players where id = auth.uid() for update;
+  if p.id is null then raise exception 'jogador nao encontrado'; end if;
+
+  if p.last_daily_at is not null and p.last_daily_at > now() - interval '24 hours' then
+    v_espera := (p.last_daily_at + interval '24 hours') - now();
+    raise exception 'o diario volta em %', to_char(v_espera, 'HH24"h"MI"min"');
+  end if;
+
+  v_comuns := (select valor from public.pack_params where chave = 'diario_comuns')::int;
+  v_raros  := (select valor from public.pack_params where chave = 'diario_raros')::int;
+  v_ciclo  := (select valor from public.pack_params where chave = 'diario_ultra_ciclo')::int;
+
+  -- streak: mantem se resgatou nas ultimas 48h, senao recomeca
+  v_streak := case
+    when p.last_daily_at is not null and p.last_daily_at > now() - interval '48 hours'
+      then (p.dailies_claimed % 7) + 1
+    else 1 end;
+
+  v_ultra := (p.dailies_claimed + 1) % v_ciclo = 0;
+
+  update public.players set
+    packs_common_daily = packs_common_daily + v_comuns,
+    packs_rare_daily   = packs_rare_daily   + v_raros,
+    packs_ultra_daily  = packs_ultra_daily  + (case when v_ultra then 1 else 0 end),
+    last_daily_at      = now(),
+    dailies_claimed    = case
+      when p.last_daily_at is not null and p.last_daily_at > now() - interval '48 hours'
+        then dailies_claimed + 1
+      else 1 end
+  where id = p.id;
+
+  v_bonus := (select valor from public.economy_config where chave = 'bonus_login')::int;
+  if v_streak = 7 then
+    v_extra := (select valor from public.economy_config where chave = 'bonus_login_streak7')::int;
+  end if;
+  perform private.mover_baba(p.id, v_bonus + v_extra, 'login diario',
+                             'streak ' || v_streak::text);
+
+  return jsonb_build_object(
+    'comuns', v_comuns, 'raros', v_raros, 'ultra', v_ultra,
+    'streak', v_streak, 'baba', v_bonus + v_extra,
+    'proximo_ultra_em', case when v_ultra then v_ciclo else v_ciclo - ((p.dailies_claimed + 1) % v_ciclo) end);
+end;
+$$;
+
+-- ================================================================ bonus de troca
+-- Spec §19.3: +25 para os dois lados, 5 por dia, e SO quando a troca move
+-- colecao de verdade.
+--
+-- Sem a trava a moeda vira impressora: dois amigos trocam as mesmas duas
+-- cartas de ida e volta cinco vezes por dia e sacam 125 baba cada, do nada.
+-- Por isso o par (jogadores, card_type) so paga uma vez na vida.
+create or replace function private.pagar_troca(
+  p_a uuid, p_b uuid, p_tipo_para_a int, p_tipo_para_b int)
+returns void
+language plpgsql volatile
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_val   int := (select valor from public.economy_config where chave = 'bonus_troca')::int;
+  v_teto  int := (select valor from public.economy_config where chave = 'bonus_troca_max_dia')::int;
+  v_menor uuid := least(p_a, p_b);
+  v_maior uuid := greatest(p_a, p_b);
+  v_hoje  int;
+  v_tipo  int;
+  v_quem  uuid;
+begin
+  foreach v_tipo in array array[p_tipo_para_a, p_tipo_para_b] loop
+    v_quem := case when v_tipo = p_tipo_para_a then p_a else p_b end;
+    continue when v_tipo is null;
+
+    -- so paga se o par de jogadores nunca recebeu por este card_type
+    if exists (select 1 from public.trade_rewards
+               where player_a = v_menor and player_b = v_maior and card_type_id = v_tipo) then
+      continue;
+    end if;
+
+    select count(*) into v_hoje from public.baba_log
+    where player_id = v_quem and motivo = 'troca concluida'
+      and created_at > now() - interval '24 hours';
+    continue when v_hoje >= v_teto;
+
+    insert into public.trade_rewards (player_a, player_b, card_type_id)
+    values (v_menor, v_maior, v_tipo)
+    on conflict do nothing;
+
+    perform private.mover_baba(v_quem, v_val, 'troca concluida', v_tipo::text);
+  end loop;
+end;
+$$;
+
+-- accept_trade passa a pagar o bonus. Recria inteira porque plpgsql nao
+-- tem patch parcial.
+create or replace function public.accept_trade(p_trade_id bigint)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid uuid := auth.uid();
+  t     public.trades;
+  v_de  uuid;
+  v_para uuid;
+  function_motivo text;
+  v_tipo_ofer int;
+  v_tipo_ped  int;
+  v_novo_para_recebedor int;
+  v_novo_para_propositor int;
+begin
+  if v_uid is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+
+  select * into t from public.trades where id = p_trade_id for update;
+  if t.id is null then raise exception 'proposta nao existe'; end if;
+  if t.to_player <> v_uid then raise exception 'essa proposta nao e sua' using errcode = '42501'; end if;
+  if t.status <> 'pending' then raise exception 'essa proposta ja foi resolvida'; end if;
+
+  if t.offered_copy_id is not null then
+    select owner_id into v_de from public.card_copies
+    where id = t.offered_copy_id and not burned for update;
+    if v_de is distinct from t.from_player then
+      function_motivo := 'a carta oferecida mudou de dono desde a proposta';
+    end if;
+  end if;
+
+  if t.requested_copy_id is not null then
+    select owner_id into v_para from public.card_copies
+    where id = t.requested_copy_id and not burned for update;
+    if v_para is distinct from t.to_player then
+      function_motivo := 'a carta pedida mudou de dono desde a proposta';
+    end if;
+  end if;
+
+  if function_motivo is null and t.offered_baba > 0
+     and (select baba from public.players where id = t.from_player) < t.offered_baba then
+    function_motivo := 'quem propos nao tem mais saldo para cobrir a oferta';
+  end if;
+  if function_motivo is null and t.requested_baba > 0
+     and (select baba from public.players where id = t.to_player) < t.requested_baba then
+    function_motivo := 'voce nao tem mais saldo para cobrir o pedido';
+  end if;
+
+  if function_motivo is not null then
+    update public.trades set status = 'cancelled', resolved_at = now() where id = t.id;
+    return jsonb_build_object('ok', false, 'motivo', function_motivo, 'trade_id', t.id);
+  end if;
+
+  -- Guarda ANTES de mover: o bonus so vale se o lado que recebe ficar com um
+  -- card_type do qual tinha ZERO. Depois da troca ja tem 1 e a conta muda.
+  select card_type_id into v_tipo_ofer from public.card_copies where id = t.offered_copy_id;
+  select card_type_id into v_tipo_ped  from public.card_copies where id = t.requested_copy_id;
+
+  v_novo_para_recebedor := case when v_tipo_ofer is not null and not exists (
+    select 1 from public.card_copies where owner_id = t.to_player
+      and card_type_id = v_tipo_ofer and not burned) then v_tipo_ofer end;
+  v_novo_para_propositor := case when v_tipo_ped is not null and not exists (
+    select 1 from public.card_copies where owner_id = t.from_player
+      and card_type_id = v_tipo_ped and not burned) then v_tipo_ped end;
+
+  if t.offered_copy_id is not null then
+    update public.card_copies set owner_id = t.to_player, claimed_at = now()
+    where id = t.offered_copy_id;
+    insert into public.copy_history (copy_id, from_player, to_player, kind)
+    values (t.offered_copy_id, t.from_player, t.to_player, 'trade');
+  end if;
+
+  if t.requested_copy_id is not null then
+    update public.card_copies set owner_id = t.from_player, claimed_at = now()
+    where id = t.requested_copy_id;
+    insert into public.copy_history (copy_id, from_player, to_player, kind)
+    values (t.requested_copy_id, t.to_player, t.from_player, 'trade');
+  end if;
+
+  if t.offered_baba > 0 then
+    perform private.mover_baba(t.from_player, -t.offered_baba, 'troca', t.id::text);
+    perform private.mover_baba(t.to_player,    t.offered_baba, 'troca', t.id::text);
+  end if;
+  if t.requested_baba > 0 then
+    perform private.mover_baba(t.to_player,   -t.requested_baba, 'troca', t.id::text);
+    perform private.mover_baba(t.from_player,  t.requested_baba, 'troca', t.id::text);
+  end if;
+
+  update public.trades set status = 'accepted', resolved_at = now() where id = t.id
+  returning * into t;
+
+  update public.trades set status = 'cancelled', resolved_at = now()
+  where status = 'pending' and id <> t.id
+    and (offered_copy_id   in (t.offered_copy_id, t.requested_copy_id)
+      or requested_copy_id in (t.offered_copy_id, t.requested_copy_id));
+
+  update public.players set
+    showcase_1 = case when showcase_1 in (t.offered_copy_id, t.requested_copy_id) then null else showcase_1 end,
+    showcase_2 = case when showcase_2 in (t.offered_copy_id, t.requested_copy_id) then null else showcase_2 end,
+    showcase_3 = case when showcase_3 in (t.offered_copy_id, t.requested_copy_id) then null else showcase_3 end
+  where id in (t.from_player, t.to_player);
+
+  delete from public.album_colagem
+  where copy_id in (t.offered_copy_id, t.requested_copy_id);
+
+  -- bonus so quando a troca moveu colecao de verdade
+  perform private.pagar_troca(t.to_player, t.from_player,
+                              v_novo_para_recebedor, v_novo_para_propositor);
+
+  return jsonb_build_object('ok', true, 'trade_id', t.id);
+end;
+$$;
+
+-- ================================================================ estoque
+-- Spec §8, cascata de esgotamento: o front precisa saber quando o pool esta
+-- no fim para avisar com honestidade em vez de so entregar menos.
+create or replace function public.estoque_publico()
+returns jsonb
+language sql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+  select jsonb_build_object(
+    'por_tier', coalesce(jsonb_agg(jsonb_build_object(
+      'tier', x.tier, 'tier_order', x.tier_order,
+      'disponiveis', x.disponiveis, 'total', x.total
+    ) order by x.tier_order), '[]'::jsonb),
+    'reserva_diaria', (select count(*) from public.card_copies
+                       where reserved_for_daily and owner_id is null and not burned),
+    'pool_base', (select count(*) from public.card_copies cc
+                  join public.card_types ct on ct.id = cc.card_type_id
+                  where ct.tier in ('comum','incomum')
+                    and cc.owner_id is null and not cc.burned)
+  )
+  from (
+    select t.slug as tier, t.tier_order,
+           count(*) filter (where cc.owner_id is null and not cc.burned) as disponiveis,
+           count(*) as total
+    from public.tiers t
+    join public.card_types ct on ct.tier = t.slug
+    join public.card_copies cc on cc.card_type_id = ct.id
+    group by t.slug, t.tier_order
+  ) x;
+$$;
+
+do $$
+declare f text;
+begin
+  foreach f in array array['claim_daily()'] loop
+    execute format('revoke all on function public.%s from public, anon', f);
+    execute format('grant execute on function public.%s to authenticated', f);
+    execute format('alter function public.%s owner to postgres', f);
+  end loop;
+  execute 'revoke all on function public.estoque_publico() from public';
+  execute 'grant execute on function public.estoque_publico() to anon, authenticated';
+  execute 'alter function public.estoque_publico() owner to postgres';
+  execute 'alter function public.accept_trade(bigint) owner to postgres';
+  execute 'grant execute on function public.accept_trade(bigint) to authenticated';
+end $$;
+
+
+-- ===== 20260822170000_indice_e_ranking.sql =====
+-- BELESMA figurinhas - conserta a contagem de "distribuidas" e enriquece o
+-- ranking da cacada de serial.
+
+-- ================================================================ distribuidas
+-- BUG: a contagem media "quantas estao com dono AGORA", mas a spec §11 pede
+-- "quantas ja SAIRAM do total". Uma copia vendida volta ao pool com
+-- owner_id null e sumia da conta - dava linha com estreia mundial creditada
+-- e "0 de 250" ao lado, que e contraditorio.
+--
+-- "Ja saiu" agora e: tem dono, OU foi queimada, OU tem desgaste (so quem foi
+-- vendida ganha), OU tem registro de pull/daily no historico. A condicao e
+-- redundante de proposito: o historico de alguns jogadores foi perdido num
+-- bug meu de script, e os outros criterios cobrem esse buraco.
+create or replace function public.global_index()
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v jsonb;
+begin
+  with tipos as (
+    select ct.id, ct.character_id, ct.skin, ct.tier, ct.tier_order, ct.print_run,
+           count(*) filter (
+             where cc.origin = 'pull' and (
+               cc.owner_id is not null
+               or cc.burned
+               or cc.damage_level > 0
+               or exists (select 1 from public.copy_history h
+                          where h.copy_id = cc.id and h.kind in ('pull','daily'))
+             ))                                                               as distribuidas,
+           bool_or(cc.first_discovered_at is not null and cc.origin = 'pull') as descoberto,
+           min(cc.first_discovered_at) filter (where cc.origin = 'pull')      as em,
+           (select p.nickname from public.card_copies c2
+            join public.players p on p.id = c2.first_discovered_by
+            where c2.card_type_id = ct.id and c2.origin = 'pull'
+              and c2.first_discovered_at is not null
+            order by c2.first_discovered_at limit 1)                          as primeiro
+    from public.card_types ct
+    left join public.card_copies cc on cc.card_type_id = ct.id
+    group by ct.id
+  )
+  select jsonb_build_object(
+    'personagens', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'slug', ch.slug, 'nome', ch.name, 'display_order', ch.display_order,
+        'descoberto', (select bool_or(t.descoberto) from tipos t where t.character_id = ch.id),
+        'tipos', (select jsonb_agg(jsonb_build_object(
+                    'skin', t.skin, 'tier', t.tier, 'tier_order', t.tier_order,
+                    'print_run', t.print_run, 'distribuidas', t.distribuidas,
+                    'descoberto', t.descoberto, 'primeiro', t.primeiro, 'em', t.em)
+                    order by t.tier_order, t.skin)
+                  from tipos t where t.character_id = ch.id)
+      ) order by ch.display_order)
+      from public.characters ch), '[]'::jsonb),
+    'descobertos', (select count(distinct t.character_id) from tipos t where t.descoberto),
+    'total_personagens', (select count(*) from public.characters)
+  ) into v;
+  return v;
+end;
+$$;
+
+-- ================================================================ ranking
+-- Agora devolve as MELHORES cartas de cada um, com copy_id, para a tela
+-- poder mostrar a figurinha e abrir em tela cheia.
+create or replace function public.ranking_serial()
+returns jsonb
+language sql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'nickname', p.nickname,
+    'copias', x.copias,
+    'selos', x.selos,
+    'unos', x.unos,
+    'melhor_serial', x.melhor_serial,
+    'destaques', (
+      -- as 6 melhores: primeiro tier, depois selo, depois menor serial
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'copy_id', d.id, 'serial_number', d.serial_number, 'print_run', d.print_run,
+        'seal', d.seal, 'origin', d.origin, 'forge_index', d.forge_index,
+        'damage_level', d.damage_level, 'verify_code', d.verify_code,
+        'card_type_id', d.card_type_id,
+        'tier', d.tier, 'tier_order', d.tier_order, 'skin', d.skin,
+        'character_slug', d.slug, 'character_name', d.name) order by d.rn), '[]'::jsonb)
+      from (
+        select cc.id, cc.serial_number, ct.print_run, cc.seal, cc.origin, cc.forge_index,
+               cc.damage_level, cc.verify_code, cc.card_type_id,
+               ct.tier, ct.tier_order, ct.skin, ch.slug, ch.name,
+               row_number() over (
+                 order by ct.tier_order desc,
+                          (cc.seal <> 'none') desc,
+                          cc.serial_number) as rn
+        from public.card_copies cc
+        join public.card_types ct on ct.id = cc.card_type_id
+        join public.characters ch on ch.id = ct.character_id
+        where cc.owner_id = x.owner_id and not cc.burned
+      ) d where d.rn <= 6)
+  ) order by x.selos desc, x.melhor_serial), '[]'::jsonb)
+  from (
+    select cc.owner_id,
+           count(*) as copias,
+           count(*) filter (where cc.seal <> 'none') as selos,
+           count(*) filter (where cc.serial_number = 1) as unos,
+           min(cc.serial_number) as melhor_serial
+    from public.card_copies cc
+    where cc.owner_id is not null and not cc.burned
+    group by cc.owner_id
+  ) x
+  join public.players p on p.id = x.owner_id;
+$$;
+
+alter function public.global_index()  owner to postgres;
+alter function public.ranking_serial() owner to postgres;
+grant execute on function public.global_index()  to anon, authenticated;
+grant execute on function public.ranking_serial() to anon, authenticated;
+
+
+-- ===== 20260822180000_admin_extras.sql =====
+-- BELESMA figurinhas - ferramentas administrativas adicionais (spec §18)
+--
+-- Tudo aqui e security definer com private.require_admin() por dentro, e
+-- grava em admin_log. Nenhuma delas apaga card_types nem characters.
+
+-- ---------------------------------------------------------------- dar baba
+-- A moeda so nasce por regra do jogo (venda, album, estreia, troca, login).
+-- Isto e a valvula do operador: creditar ou debitar na mao, com motivo, e
+-- SEMPRE aparecendo no extrato do jogador.
+create or replace function public.admin_dar_baba(p_target text, p_delta int, p_motivo text)
+returns int
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_n int := 0; p record;
+begin
+  perform private.require_admin();
+  if p_delta = 0 then raise exception 'delta zero nao faz nada'; end if;
+  if coalesce(trim(p_motivo), '') = '' then raise exception 'diga o motivo'; end if;
+
+  for p in select id, baba from public.players
+           where p_target = 'todos' or nickname = p_target::extensions.citext loop
+    -- o CHECK (baba >= 0) recusaria o debito; corta no zero em vez de estourar
+    perform private.mover_baba(p.id, greatest(p_delta, -p.baba), 'admin: ' || p_motivo, null);
+    v_n := v_n + 1;
+  end loop;
+
+  if v_n = 0 then raise exception 'ninguem encontrado para %', p_target; end if;
+  perform private.registrar('admin_dar_baba', p_target,
+    jsonb_build_object('delta', p_delta, 'motivo', p_motivo, 'jogadores', v_n));
+  return v_n;
+end;
+$$;
+
+-- ---------------------------------------------------------------- extrato
+create or replace function public.admin_extrato(p_nickname text)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_id uuid;
+begin
+  perform private.require_admin();
+  select id into v_id from public.players where nickname = p_nickname::extensions.citext;
+  if v_id is null then raise exception 'jogador nao encontrado'; end if;
+
+  return jsonb_build_object(
+    'saldo', (select baba from public.players where id = v_id),
+    'lancamentos', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'delta', b.delta, 'motivo', b.motivo, 'ref', b.ref_id, 'em', b.created_at)
+        order by b.id desc)
+      from (select * from public.baba_log where player_id = v_id
+            order by id desc limit 100) b), '[]'::jsonb));
+end;
+$$;
+
+-- ---------------------------------------------------------------- acervo
+create or replace function public.admin_acervo(p_nickname text)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_id uuid;
+begin
+  perform private.require_admin();
+  select id into v_id from public.players where nickname = p_nickname::extensions.citext;
+  if v_id is null then raise exception 'jogador nao encontrado'; end if;
+
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'tier', ct.tier, 'tier_order', ct.tier_order, 'skin', ct.skin,
+      'personagem', ch.slug, 'serial', cc.serial_number, 'print_run', ct.print_run,
+      'seal', cc.seal, 'origin', cc.origin, 'forge_index', cc.forge_index,
+      'damage_level', cc.damage_level, 'verify_code', cc.verify_code)
+      order by ct.tier_order desc, ch.slug, ct.skin)
+    from public.card_copies cc
+    join public.card_types ct on ct.id = cc.card_type_id
+    join public.characters ch on ch.id = ct.character_id
+    where cc.owner_id = v_id and not cc.burned), '[]'::jsonb);
+end;
+$$;
+
+-- ---------------------------------------------------------------- auditoria do sorteio
+-- Compara a distribuicao REAL do slot de hit com a tabela de pack_config.
+-- E o unico jeito de descobrir que as odds sairam do lugar sem ninguem ver.
+create or replace function public.admin_auditoria_sorteio()
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+begin
+  perform private.require_admin();
+  return jsonb_build_object(
+    'aberturas', (select count(*) from public.pack_openings),
+    'cartas', (select count(*) from public.pack_opening_cards),
+    'variancia', jsonb_build_object(
+      'quente',   (select count(*) filter (where hot)   from public.pack_openings),
+      'bonus',    (select count(*) filter (where bonus) from public.pack_openings),
+      'pity',     (select count(*) filter (where pity)  from public.pack_openings),
+      'promovidos', (select coalesce(sum(promoted_slots), 0) from public.pack_openings)),
+    'hit_por_tier', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'pack_type', x.pack_type, 'tier', x.tier, 'saiu', x.n,
+        'observado_pct', round(100.0 * x.n / nullif(x.total, 0), 2),
+        'esperado_pct', x.peso)
+        order by x.pack_type, x.esperado_desc)
+      from (
+        select o.pack_type::text as pack_type, poc.tier, count(*) as n,
+               sum(count(*)) over (partition by o.pack_type) as total,
+               max(pc.weight) as peso,
+               max(t.tier_order) as esperado_desc
+        from public.pack_opening_cards poc
+        join public.pack_openings o on o.id = poc.opening_id
+        join public.tiers t on t.slug = poc.tier
+        left join public.pack_config pc
+          on pc.pack_type = o.pack_type and pc.slot = 'hit' and pc.tier = poc.tier
+        where poc.from_hit_table and not poc.garantido
+        group by o.pack_type, poc.tier
+      ) x), '[]'::jsonb),
+    -- a regra dura da §8, conferivel: zero e o unico valor aceitavel
+    'diamante_prisma_em_slot_garantido', (
+      select count(*) from public.pack_opening_cards
+      where garantido and tier in ('diamante','prisma')));
+end;
+$$;
+
+-- ---------------------------------------------------------------- album
+create or replace function public.admin_descolar_album(p_nickname text)
+returns int
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_id uuid; v_n int;
+begin
+  perform private.require_admin();
+  select id into v_id from public.players where nickname = p_nickname::extensions.citext;
+  if v_id is null then raise exception 'jogador nao encontrado'; end if;
+  delete from public.album_colagem where player_id = v_id;
+  get diagnostics v_n = row_count;
+  perform private.registrar('admin_descolar_album', p_nickname, jsonb_build_object('descoladas', v_n));
+  return v_n;
+end;
+$$;
+
+-- ---------------------------------------------------------------- reserva
+-- top_up_daily_reserve ja existe, mas so aceita um numero. Esta devolve o
+-- quadro completo para o painel decidir quanto repor.
+create or replace function public.admin_saude()
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+begin
+  perform private.require_admin();
+  return jsonb_build_object(
+    'jogadores', (select count(*) from public.players),
+    'copias_com_dono', (select count(*) from public.card_copies where owner_id is not null),
+    'queimadas', (select count(*) from public.card_copies where burned),
+    'forjadas', (select count(*) from public.card_copies where origin = 'forge'),
+    'reserva_diaria', (select count(*) from public.card_copies
+                       where reserved_for_daily and owner_id is null and not burned),
+    'pool_base_livre', (select count(*) from public.card_copies cc
+                        join public.card_types ct on ct.id = cc.card_type_id
+                        where ct.tier in ('comum','incomum')
+                          and cc.owner_id is null and not cc.burned
+                          and not cc.reserved_for_daily),
+    'baba_em_circulacao', (select coalesce(sum(baba), 0) from public.players),
+    'trocas_pendentes', (select count(*) from public.trades where status = 'pending'),
+    -- invariantes: qualquer numero diferente de zero aqui e bug
+    'alertas', jsonb_build_object(
+      'selos_fora_de_36_12_3', (
+        select case when count(*) filter (where seal='branco') = 36
+                     and count(*) filter (where seal='preto')  = 12
+                     and count(*) filter (where seal='rosa')   = 3
+               then 0 else 1 end from public.card_copies),
+      'forjada_com_selo', (select count(*) from public.card_copies
+                           where origin = 'forge' and seal <> 'none'),
+      'forjada_com_serial', (select count(*) from public.card_copies
+                             where origin = 'forge' and serial_number is not null),
+      'serial_acima_da_tiragem', (select count(*) from public.card_copies cc
+                                  join public.card_types ct on ct.id = cc.card_type_id
+                                  where cc.serial_number > ct.print_run),
+      'saldo_diferente_do_extrato', (
+        select count(*) from public.players p
+        where p.baba <> coalesce((select sum(delta) from public.baba_log b
+                                  where b.player_id = p.id), 0))));
+end;
+$$;
+
+do $$
+declare f text;
+begin
+  foreach f in array array[
+    'admin_dar_baba(text,int,text)', 'admin_extrato(text)', 'admin_acervo(text)',
+    'admin_auditoria_sorteio()', 'admin_descolar_album(text)', 'admin_saude()'
+  ] loop
+    execute format('revoke all on function public.%s from public, anon', f);
+    execute format('grant execute on function public.%s to authenticated', f);
+    execute format('alter function public.%s owner to postgres', f);
+  end loop;
+end $$;
+
+
+-- ===== 20260822190000_distribuidas_e_estreias.sql =====
+-- BELESMA figurinhas - conserta de vez a contagem de "distribuidas" e limpa
+-- as estreias fantasma.
+
+-- ================================================================ distribuidas
+-- A tentativa anterior somava varios sinais indiretos e ainda errava. O sinal
+-- CERTO estava na frente o tempo todo: open_pack faz
+--
+--   first_discovered_at = coalesce(first_discovered_at, now())
+--
+-- por COPIA, nao por tipo. Entao toda copia que ja saiu de um pacote tem
+-- first_discovered_at preenchido, e isso nunca e apagado - nem por venda, nem
+-- por troca, nem por reset administrativo (a §18.2 e explicita: estreia
+-- mundial e historia, nao posse).
+--
+-- E, portanto, a marca permanente de "esta copia ja saiu".
+create or replace function public.global_index()
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v jsonb;
+begin
+  with tipos as (
+    select ct.id, ct.character_id, ct.skin, ct.tier, ct.tier_order, ct.print_run,
+           count(*) filter (
+             where cc.origin = 'pull' and cc.first_discovered_at is not null)   as distribuidas,
+           count(*) filter (
+             where cc.origin = 'pull' and cc.owner_id is not null)              as em_maos,
+           bool_or(cc.first_discovered_at is not null and cc.origin = 'pull')   as descoberto,
+           min(cc.first_discovered_at) filter (where cc.origin = 'pull')        as em,
+           (select p.nickname from public.card_copies c2
+            join public.players p on p.id = c2.first_discovered_by
+            where c2.card_type_id = ct.id and c2.origin = 'pull'
+              and c2.first_discovered_at is not null
+            order by c2.first_discovered_at limit 1)                            as primeiro
+    from public.card_types ct
+    left join public.card_copies cc on cc.card_type_id = ct.id
+    group by ct.id
+  )
+  select jsonb_build_object(
+    'personagens', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'slug', ch.slug, 'nome', ch.name, 'display_order', ch.display_order,
+        'descoberto', (select bool_or(t.descoberto) from tipos t where t.character_id = ch.id),
+        'tipos', (select jsonb_agg(jsonb_build_object(
+                    'skin', t.skin, 'tier', t.tier, 'tier_order', t.tier_order,
+                    'print_run', t.print_run, 'distribuidas', t.distribuidas,
+                    'em_maos', t.em_maos,
+                    'descoberto', t.descoberto, 'primeiro', t.primeiro, 'em', t.em)
+                    order by t.tier_order, t.skin)
+                  from tipos t where t.character_id = ch.id)
+      ) order by ch.display_order)
+      from public.characters ch), '[]'::jsonb),
+    'descobertos', (select count(distinct t.character_id) from tipos t where t.descoberto),
+    'total_personagens', (select count(*) from public.characters)
+  ) into v;
+  return v;
+end;
+$$;
+
+alter function public.global_index() owner to postgres;
+grant execute on function public.global_index() to anon, authenticated;
+
+-- ================================================================ estreias fantasma
+-- Os scripts de teste de concorrencia abriram pacotes em producao com
+-- jogadores descartaveis. Ao apagar esses jogadores, o FK
+-- first_discovered_by virou NULL (on delete set null), mas
+-- first_discovered_at ficou - resultando em tipos marcados como DESCOBERTOS
+-- sem ninguem creditado, roubando do grupo a chance de fazer a estreia.
+--
+-- Limpa so o caso inequivoco: descoberta sem descobridor E sem dono atual.
+-- Copia descoberta por jogador que existe nao e tocada.
+do $$
+declare v_n int;
+begin
+  update public.card_copies
+  set first_discovered_at = null
+  where first_discovered_at is not null
+    and first_discovered_by is null
+    and owner_id is null
+    and not burned;
+  get diagnostics v_n = row_count;
+  raise notice 'estreias fantasma limpas: %', v_n;
+end $$;
+
+
+-- ===== 20260822200000_ranking_e_selo.sql =====
+-- BELESMA figurinhas - criterios do ranking e o selo entrando no preco
+
+-- ================================================================ pontuacao
+-- "A carta mais rara possivel" precisa de um criterio unico, senao cada
+-- pessoa discute a sua. Este e o criterio, e ele esta a vista na tela:
+--
+--   raridade      tier_order (1 a 12), peso maior de todos
+--   selo          rosa > preto > branco > nenhum
+--   tiragem       quanto MENOR a tiragem, mais raro
+--   serial        quanto MENOR o serial, mais cobicado; o 1/N vale extra
+--   procedencia   puxada vale mais que forjada (supply paralelo)
+--   conservacao   desgaste tira ponto
+--
+-- Os pesos sao ordens de grandeza separadas de proposito: raridade nunca
+-- perde para selo, selo nunca perde para serial. Assim o ranking nao inverte
+-- por acaso quando alguem junta muitas cartas medianas.
+create or replace function private.pontos_carta(
+  p_tier_order smallint, p_seal public.seal_type, p_print_run int,
+  p_serial int, p_origin public.copy_origin, p_damage int)
+returns numeric
+language sql immutable
+as $$
+  select
+      p_tier_order * 1000000
+    + (case p_seal when 'rosa' then 3 when 'preto' then 2 when 'branco' then 1 else 0 end) * 100000
+    + (case when p_print_run > 0 then least(50000, 50000.0 / p_print_run) else 0 end)
+    + (case when p_serial = 1 then 8000
+            when p_serial is null then 0
+            else greatest(0, 5000 - p_serial * 10) end)
+    + (case when p_origin = 'pull' then 2000 else 0 end)
+    - p_damage * 1500
+$$;
+
+create or replace function public.ranking_serial()
+returns jsonb
+language sql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+  with pontuadas as (
+    select cc.id, cc.owner_id, cc.serial_number, cc.seal, cc.origin, cc.forge_index,
+           cc.damage_level, cc.verify_code, cc.card_type_id,
+           ct.print_run, ct.tier, ct.tier_order, ct.skin, ch.slug, ch.name,
+           private.pontos_carta(ct.tier_order, cc.seal, ct.print_run,
+                                cc.serial_number, cc.origin, cc.damage_level) as pontos
+    from public.card_copies cc
+    join public.card_types ct on ct.id = cc.card_type_id
+    join public.characters ch on ch.id = ct.character_id
+    where cc.owner_id is not null and not cc.burned
+  ),
+  agregado as (
+    select owner_id,
+           count(*)                                            as copias,
+           count(*) filter (where seal <> 'none')               as selos,
+           count(*) filter (where serial_number = 1)            as unos,
+           min(serial_number) filter (where origin = 'pull')    as melhor_serial,
+           max(tier_order)                                      as melhor_tier,
+           round(sum(pontos) / 1000000.0, 1)                    as pontos_total
+    from pontuadas group by owner_id
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'nickname', p.nickname,
+    'copias', a.copias, 'selos', a.selos, 'unos', a.unos,
+    'melhor_serial', a.melhor_serial,
+    'pontos', a.pontos_total,
+
+    -- os tres troféus, cada um com critério próprio e explícito
+    'joia',   (select to_jsonb(x) from (
+                select id as copy_id, serial_number, print_run, seal, origin, forge_index,
+                       damage_level, verify_code, card_type_id, tier, tier_order, skin,
+                       slug as character_slug, name as character_name
+                from pontuadas where owner_id = a.owner_id
+                order by pontos desc limit 1) x),
+    'menor_serial', (select to_jsonb(x) from (
+                select id as copy_id, serial_number, print_run, seal, origin, forge_index,
+                       damage_level, verify_code, card_type_id, tier, tier_order, skin,
+                       slug as character_slug, name as character_name
+                from pontuadas where owner_id = a.owner_id and origin = 'pull'
+                -- desempate: mesmo serial, ganha a de tiragem menor, depois a mais rara
+                order by serial_number, print_run, tier_order desc limit 1) x),
+    'melhor_selo', (select to_jsonb(x) from (
+                select id as copy_id, serial_number, print_run, seal, origin, forge_index,
+                       damage_level, verify_code, card_type_id, tier, tier_order, skin,
+                       slug as character_slug, name as character_name
+                from pontuadas where owner_id = a.owner_id and seal <> 'none'
+                order by case seal when 'rosa' then 3 when 'preto' then 2 else 1 end desc,
+                         tier_order desc, serial_number limit 1) x),
+
+    'destaques', (select coalesce(jsonb_agg(to_jsonb(x) order by x.pontos desc), '[]'::jsonb)
+                  from (
+                    select id as copy_id, serial_number, print_run, seal, origin, forge_index,
+                           damage_level, verify_code, card_type_id, tier, tier_order, skin,
+                           slug as character_slug, name as character_name, pontos
+                    from pontuadas where owner_id = a.owner_id
+                    order by pontos desc limit 8) x)
+  ) order by a.pontos_total desc), '[]'::jsonb)
+  from agregado a join public.players p on p.id = a.owner_id;
+$$;
+
+-- ================================================================ selo no preco
+-- A spec §19.4 diz "nunca vende copia selada". A intencao era proteger o
+-- trofeu de uma venda por engano - o selo e a coisa mais rara que existe
+-- fora das Prismas: 36 brancos, 12 pretos e 3 rosas no mundo inteiro.
+--
+-- Passa a ser vendavel, com premio e com aviso reforcado na interface. O que
+-- NAO muda: a contagem de selos do mundo continua 36/12/3, porque o selo
+-- viaja com a copia de volta para o pool. A prisma segue invendavel.
+insert into public.economy_config (chave, valor, descricao) values
+  ('multiplicador_selo_branco',  2, 'Premio de venda para copia com selo branco'),
+  ('multiplicador_selo_preto',   4, 'Premio de venda para copia com selo preto'),
+  ('multiplicador_selo_rosa',   10, 'Premio de venda para copia com selo rosa')
+on conflict (chave) do nothing;
+
+create or replace function public.vender(p_copy_id bigint)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  c       record;
+  v_valor numeric;
+  v_saldo int;
+begin
+  if v_uid is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+
+  select cc.id, cc.card_type_id, cc.seal, cc.origin, cc.damage_level, cc.owner_id,
+         ct.tier, t.vendavel
+    into c
+  from public.card_copies cc
+  join public.card_types ct on ct.id = cc.card_type_id
+  join public.tiers t on t.slug = ct.tier
+  where cc.id = p_copy_id and not cc.burned
+  for update of cc;
+
+  if c.id is null or c.owner_id <> v_uid then raise exception 'essa copia nao e sua'; end if;
+  if not c.vendavel then raise exception 'figurinha % nao pode ser vendida', c.tier; end if;
+
+  if (select count(*) from public.card_copies
+      where owner_id = v_uid and card_type_id = c.card_type_id and not burned) < 2 then
+    raise exception 'essa e a sua ultima copia desse tipo';
+  end if;
+
+  if exists (select 1 from public.trades where status = 'pending'
+             and (offered_copy_id = p_copy_id or requested_copy_id = p_copy_id)) then
+    raise exception 'essa copia esta em proposta de troca aberta';
+  end if;
+
+  v_valor := private.preco('venda_' || c.tier);
+  if v_valor is null then raise exception 'sem preco para o tier %', c.tier; end if;
+
+  -- o selo entra ANTES dos redutores: mais raro, mais caro
+  if c.seal <> 'none' then
+    v_valor := v_valor * coalesce(private.preco('multiplicador_selo_' || c.seal::text), 1);
+  end if;
+  if c.damage_level > 0 then v_valor := v_valor * private.preco('multiplicador_estragada'); end if;
+  if c.origin = 'forge'  then v_valor := v_valor * private.preco('multiplicador_forjada'); end if;
+  v_valor := floor(v_valor);
+
+  insert into public.copy_history (copy_id, from_player, to_player, kind)
+  values (p_copy_id, v_uid, null, 'sell');
+
+  if c.origin = 'forge' then
+    update public.card_copies
+    set owner_id = null, claimed_at = null, burned = true
+    where id = p_copy_id;
+  else
+    update public.card_copies
+    set owner_id = null, claimed_at = null,
+        damage_level = least(damage_level + 1, 3)
+    where id = p_copy_id;
+  end if;
+
+  delete from public.album_colagem where copy_id = p_copy_id;
+  update public.players set
+    showcase_1 = case when showcase_1 = p_copy_id then null else showcase_1 end,
+    showcase_2 = case when showcase_2 = p_copy_id then null else showcase_2 end,
+    showcase_3 = case when showcase_3 = p_copy_id then null else showcase_3 end
+  where id = v_uid;
+
+  v_saldo := private.mover_baba(v_uid, v_valor::int, 'venda', p_copy_id::text);
+  return jsonb_build_object('valor', v_valor, 'saldo', v_saldo,
+                            'queimada', c.origin = 'forge', 'selo', c.seal);
+end;
+$$;
+
+alter function public.ranking_serial() owner to postgres;
+alter function public.vender(bigint)   owner to postgres;
+grant execute on function public.ranking_serial() to anon, authenticated;
+grant execute on function public.vender(bigint)   to authenticated;
+
+
+-- ===== 20260822210000_cascata_respeita_garantia.sql =====
+-- BELESMA figurinhas - a cascata precisa respeitar a garantia do pacote
+--
+-- BUG: quando a tabela de hit inteira ficava sem estoque, o fallback
+-- sorteava de QUALQUER tier com estoque - inclusive comum. Um pacote Ultra
+-- podia entregar uma comum no slot de hit, quebrando "mitica ou melhor".
+--
+-- Medido com 1500 pacotes Ultra e o estoque alto esgotado: 120 pacotes
+-- sairam abaixo da garantia e o qui-quadrado do slot de hit foi a 704.
+--
+-- A §8 diz "tier sem estoque desce um nivel e re-sorteia" e tambem que o
+-- Raro garante epica+ e o Ultra garante mitica+. As duas frases so convivem
+-- se a descida parar no piso da garantia. Abaixo dele o pacote sai MENOR e o
+-- front avisa - que e a outra coisa que a §8 manda fazer.
+create or replace function public.open_pack(pack_type text)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_uid        uuid := auth.uid();
+  v_jogador    public.players;
+  v_tipo       public.pack_type := pack_type::public.pack_type;
+  v_do_diario  boolean := false;
+
+  v_quente     boolean := false;
+  v_bonus      boolean := false;
+  v_pity       boolean := false;
+  v_promovidos int := 0;
+
+  v_n_base     int;
+  v_pity_lim   int;
+  v_slots      int;
+  v_i          int;
+  v_tent       int;
+
+  v_da_tabela  boolean;
+  v_garantido  boolean;
+  v_natural    boolean;
+  v_tier       text;
+  v_type_id    int;
+  v_copy_id    bigint;
+  v_reserva    boolean;
+
+  v_tiers      text[];
+  v_pesos      numeric[];
+  v_idx        int;
+  v_piso       smallint;
+  v_piso_gar   smallint;      -- piso da GARANTIA do pacote
+
+  v_usados     int[] := '{}';
+  v_copias     bigint[] := '{}';
+  v_tiers_saiu text[] := '{}';
+  v_do_hit     boolean[] := '{}';
+  v_garantidos boolean[] := '{}';
+
+  v_abertura   bigint;
+  v_ordem      int[];
+  v_tmp        int;
+  v_j          int;
+  v_resultado  jsonb;
+begin
+  if v_uid is null then
+    raise exception 'precisa estar logado' using errcode = '42501';
+  end if;
+
+  select * into v_jogador from public.players where id = v_uid for update;
+  if not found then
+    raise exception 'jogador nao encontrado' using errcode = '42501';
+  end if;
+
+  if v_tipo = 'comum' then
+    if v_jogador.packs_common_daily > 0 then
+      v_do_diario := true;
+      update public.players set packs_common_daily = packs_common_daily - 1 where id = v_uid;
+    elsif v_jogador.packs_common > 0 then
+      update public.players set packs_common = packs_common - 1 where id = v_uid;
+    else raise exception 'sem pacote comum'; end if;
+  elsif v_tipo = 'raro' then
+    if v_jogador.packs_rare_daily > 0 then
+      v_do_diario := true;
+      update public.players set packs_rare_daily = packs_rare_daily - 1 where id = v_uid;
+    elsif v_jogador.packs_rare > 0 then
+      update public.players set packs_rare = packs_rare - 1 where id = v_uid;
+    else raise exception 'sem pacote raro'; end if;
+  else
+    if v_jogador.packs_ultra_daily > 0 then
+      v_do_diario := true;
+      update public.players set packs_ultra_daily = packs_ultra_daily - 1 where id = v_uid;
+    elsif v_jogador.packs_ultra > 0 then
+      update public.players set packs_ultra = packs_ultra - 1 where id = v_uid;
+    else raise exception 'sem pacote ultra'; end if;
+  end if;
+
+  v_n_base   := (select valor from public.pack_params where chave = 'cartas_base')::int;
+  v_pity_lim := (select valor from public.pack_params where chave = 'pity_limite')::int;
+
+  -- O piso da garantia sai da PROPRIA tabela de odds: o menor tier que o
+  -- pacote lista no slot de hit e a promessa que ele faz. Comum lista rara,
+  -- Raro lista epica, Ultra lista mitica. Nada de constante no codigo.
+  select min(t.tier_order) into v_piso_gar
+  from public.pack_config pc join public.tiers t on t.slug = pc.tier
+  where pc.pack_type = v_tipo and pc.slot = 'hit' and pc.weight > 0;
+
+  v_quente := private.random_int(100000) <
+              (select valor from public.pack_params where chave = 'pacote_quente')::numeric * 100000;
+  v_bonus  := private.random_int(100000) <
+              (select valor from public.pack_params where chave = 'carta_bonus')::numeric * 100000;
+  v_pity   := v_tipo = 'comum' and v_jogador.pity_counter >= v_pity_lim;
+
+  v_slots := v_n_base + 1 + (case when v_bonus then 1 else 0 end);
+
+  for v_i in 1 .. v_slots loop
+    -- o slot de hit "de fabrica" e o unico que carrega a garantia; os outros
+    -- so viram hit por bonus (quente ou promocao) e podem ser rebaixados
+    v_natural   := (v_i = v_n_base + 1);
+    v_da_tabela := v_natural;
+    v_garantido := false;
+
+    if v_quente then
+      v_da_tabela := true;
+      v_garantido := true;
+    elsif not v_da_tabela then
+      if private.random_int(100000) <
+         (select valor from public.pack_params where chave = 'promocao_base')::numeric * 100000 then
+        v_da_tabela := true;
+        v_garantido := true;
+        v_promovidos := v_promovidos + 1;
+      end if;
+    elsif v_pity then
+      v_garantido := true;
+    end if;
+
+    loop
+      v_piso := case
+                  when v_pity and v_da_tabela then
+                    (select tier_order from public.tiers where slug = 'epica')
+                  else 0 end;
+
+      select array_agg(x.tier order by x.tier_order), array_agg(x.weight order by x.tier_order)
+        into v_tiers, v_pesos
+      from (
+        select pc.tier, t.tier_order, pc.weight
+        from public.pack_config pc
+        join public.tiers t on t.slug = pc.tier
+        where pc.pack_type = v_tipo
+          and pc.slot = (case when v_da_tabela then 'hit' else 'base' end)::public.pack_slot
+          and pc.weight > 0
+          and t.tier_order >= v_piso
+          and not (v_garantido and t.slug in ('diamante','prisma'))
+          and exists (
+            select 1 from public.card_copies cc
+            join public.card_types ct on ct.id = cc.card_type_id
+            where ct.tier = pc.tier and cc.owner_id is null and not cc.burned
+              and cc.reserved_for_daily = (v_do_diario and not v_da_tabela)
+          )
+      ) x;
+
+      -- Cascata. Para o slot de HIT ela nao pode descer abaixo do piso da
+      -- garantia: e melhor o pacote sair menor do que sair mentindo.
+      if v_tiers is null then
+        select array_agg(t.slug order by t.tier_order), array_agg(1::numeric)
+          into v_tiers, v_pesos
+        from public.tiers t
+        where t.slug not in ('diamante','prisma')
+          and (case when v_da_tabela then t.tier_order >= v_piso_gar else true end)
+          and t.tier_order >= v_piso
+          and exists (
+            select 1 from public.card_copies cc
+            join public.card_types ct on ct.id = cc.card_type_id
+            where ct.tier = t.slug and cc.owner_id is null and not cc.burned
+              and cc.reserved_for_daily = (v_do_diario and not v_da_tabela)
+          );
+      end if;
+
+      exit when v_tiers is not null;
+
+      -- Nada honra a promessa. Se o slot so era hit por BONUS (pacote quente
+      -- ou promocao), o bonus e o que se perde: rebaixa para base e tenta de
+      -- novo. Um pacote quente com o pool alto seco vira um pacote normal, e
+      -- nao um pacote vazio - que era o que acontecia antes.
+      exit when v_natural or not v_da_tabela;
+      if not v_quente then v_promovidos := v_promovidos - 1; end if;
+      v_da_tabela := false;
+      v_garantido := false;
+    end loop;
+
+    -- so o slot de hit natural chega aqui vazio: o pacote sai curto
+    continue when v_tiers is null;
+
+    v_idx  := private.escolher_ponderado(v_pesos);
+    v_tier := v_tiers[v_idx];
+    v_reserva := (v_do_diario and not v_da_tabela);
+
+    v_type_id := null;
+    select x.id into v_type_id
+    from (
+      select ct.id,
+             sum(count(*)) over () as total,
+             count(*) as estoque,
+             sum(count(*)) over (order by ct.id rows between unbounded preceding and current row) as ate_aqui
+      from public.card_types ct
+      join public.card_copies cc on cc.card_type_id = ct.id
+      where ct.tier = v_tier and cc.owner_id is null and not cc.burned
+        and cc.reserved_for_daily = v_reserva
+        and not (ct.id = any(v_usados))
+      group by ct.id
+    ) x
+    where x.ate_aqui > (private.random_int(1000000)::numeric / 1000000) * x.total
+    order by x.ate_aqui
+    limit 1;
+
+    if v_type_id is null then
+      select ct.id into v_type_id
+      from public.card_types ct
+      join public.card_copies cc on cc.card_type_id = ct.id
+      where ct.tier = v_tier and cc.owner_id is null and not cc.burned
+        and cc.reserved_for_daily = v_reserva
+      group by ct.id
+      order by extensions.gen_random_bytes(8)
+      limit 1;
+    end if;
+    continue when v_type_id is null;
+
+    v_copy_id := null;
+    for v_tent in 1 .. 5 loop
+      select cc.id into v_copy_id
+      from public.card_copies cc
+      where cc.card_type_id = v_type_id
+        and cc.owner_id is null and not cc.burned
+        and cc.reserved_for_daily = v_reserva
+      order by extensions.gen_random_bytes(8)
+      limit 1
+      for update skip locked;
+      exit when v_copy_id is not null;
+    end loop;
+    continue when v_copy_id is null;
+
+    update public.card_copies
+    set owner_id = v_uid,
+        claimed_at = now(),
+        first_discovered_at = coalesce(first_discovered_at, now()),
+        first_discovered_by = coalesce(first_discovered_by, v_uid)
+    where id = v_copy_id;
+
+    insert into public.copy_history (copy_id, from_player, to_player, kind)
+    values (v_copy_id, null, v_uid, case when v_do_diario then 'daily' else 'pull' end);
+
+    v_usados     := v_usados     || v_type_id;
+    v_copias     := v_copias     || v_copy_id;
+    v_tiers_saiu := v_tiers_saiu || v_tier;
+    v_do_hit     := v_do_hit     || v_da_tabela;
+    v_garantidos := v_garantidos || v_garantido;
+  end loop;
+
+  if array_length(v_copias, 1) is null then
+    raise exception 'sem estoque: nao foi possivel montar o pacote';
+  end if;
+
+  if v_tipo = 'comum' then
+    if v_pity or exists (
+      select 1 from unnest(v_tiers_saiu) s
+      join public.tiers t on t.slug = s
+      where t.tier_order > (select tier_order from public.tiers where slug = 'rara')
+    ) then
+      update public.players set pity_counter = 0 where id = v_uid;
+    else
+      update public.players set pity_counter = pity_counter + 1 where id = v_uid;
+    end if;
+  end if;
+
+  v_ordem := array(select generate_series(1, array_length(v_copias, 1)));
+  for v_i in reverse array_length(v_ordem, 1) .. 2 loop
+    v_j := private.random_int(v_i) + 1;
+    v_tmp := v_ordem[v_i]; v_ordem[v_i] := v_ordem[v_j]; v_ordem[v_j] := v_tmp;
+  end loop;
+
+  insert into public.pack_openings (player_id, pack_type, from_daily, promoted_slots, hot, pity, bonus)
+  values (v_uid, v_tipo, v_do_diario, v_promovidos, v_quente, v_pity, v_bonus)
+  returning id into v_abertura;
+
+  for v_i in 1 .. array_length(v_copias, 1) loop
+    insert into public.pack_opening_cards
+      (opening_id, copy_id, slot_index, reveal_index, tier, from_hit_table, garantido)
+    values
+      (v_abertura, v_copias[v_i], v_i, array_position(v_ordem, v_i),
+       v_tiers_saiu[v_i], v_do_hit[v_i], v_garantidos[v_i]);
+  end loop;
+
+  select jsonb_build_object(
+    'abertura', v_abertura,
+    'pack_type', v_tipo,
+    'do_diario', v_do_diario,
+    'quente', v_quente,
+    'bonus', v_bonus,
+    'pity', v_pity,
+    'promovidos', v_promovidos,
+    'esperado', v_slots,
+    'cartas', coalesce(jsonb_agg(c order by c->>'reveal_index'), '[]'::jsonb)
+  ) into v_resultado
+  from (
+    select jsonb_build_object(
+      'copy_id', cc.id,
+      'card_type_id', cc.card_type_id,
+      'reveal_index', poc.reveal_index,
+      'from_hit_table', poc.from_hit_table,
+      'garantido', poc.garantido,
+      'serial_number', cc.serial_number,
+      'print_run', ct.print_run,
+      'seal', cc.seal,
+      'origin', cc.origin,
+      'damage_level', cc.damage_level,
+      'verify_code', cc.verify_code,
+      'tier', ct.tier,
+      'tier_order', ct.tier_order,
+      'skin', ct.skin,
+      'art_path', ct.art_path,
+      'character_slug', ch.slug,
+      'character_name', ch.name,
+      'estreia_mundial', cc.first_discovered_by = v_uid and cc.first_discovered_at >= now() - interval '1 minute',
+      'nova', not exists (
+        select 1 from public.card_copies o
+        where o.card_type_id = cc.card_type_id and o.owner_id = v_uid and o.id <> cc.id
+      )
+    ) as c
+    from public.pack_opening_cards poc
+    join public.card_copies cc on cc.id = poc.copy_id
+    join public.card_types  ct on ct.id = cc.card_type_id
+    join public.characters  ch on ch.id = ct.character_id
+    where poc.opening_id = v_abertura
+  ) t;
+
+  return v_resultado;
+end;
+$$;
+
+alter function public.open_pack(text) owner to postgres;
+grant execute on function public.open_pack(text) to authenticated;
 
 
 commit;

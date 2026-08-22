@@ -133,13 +133,20 @@ export default function Album() {
    * pointerdown e nada arrastava.
    */
   function iniciarGesto(e: React.PointerEvent, carta: Carta, tipo: number) {
-    e.preventDefault()
     const x0 = e.clientX, y0 = e.clientY
     let virouArraste = false
 
     const mover = (ev: PointerEvent) => {
-      if (!virouArraste && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return
-      if (!virouArraste) { virouArraste = true; setArrastando(carta) }
+      const dx = Math.abs(ev.clientX - x0), dy = Math.abs(ev.clientY - y0)
+      if (!virouArraste) {
+        // deslize horizontal é rolagem do trilho, não arraste: só vira
+        // arraste quando o movimento é mais vertical que horizontal
+        if (Math.hypot(dx, dy) < 6) return
+        if (dx > dy) { window.removeEventListener('pointermove', mover); return }
+        virouArraste = true
+        setArrastando(carta)
+      }
+      ev.preventDefault()
       setPonteiro({ x: ev.clientX, y: ev.clientY })
     }
     const soltar = (ev: PointerEvent) => {
@@ -185,14 +192,31 @@ export default function Album() {
     }
   }, [arrastando, slotAlvo])
 
+  // Rede de segurança do virar-página. Precisa ficar aqui em cima, com os
+  // outros hooks: embaixo dos early returns ele só rodaria em parte das
+  // renderizações e quebraria a ordem dos hooks.
+  useEffect(() => {
+    if (!virando) return
+    const t = setTimeout(() => { setIndice(alvoPag.current); setVirando('') }, 1200)
+    return () => clearTimeout(t)
+  }, [virando])
+
   if (erro) return <p className="p-6 text-red-400">{erro}</p>
   if (!spreads.length) return <p className="p-6 text-neutral-500">carregando…</p>
+
+  // No celular a folha não é renderizada (uma página por vez), então
+  // onAnimationEnd nunca dispararia e `virando` ficaria preso — o álbum
+  // avançava uma vez e travava. Sem folha, a troca é direta.
+  const semAnimacao = typeof window !== 'undefined' &&
+    (window.matchMedia('(max-width: 768px)').matches ||
+     window.matchMedia('(prefers-reduced-motion: reduce)').matches)
 
   const virar = (d: number) => {
     if (virando) return
     const destino = indice + d
     if (destino < 0 || destino >= spreads.length) return
     alvoPag.current = destino
+    if (semAnimacao) { setIndice(destino); return }
     setVirando(d > 0 ? 'frente' : 'tras')
   }
   const aoFim = () => { setIndice(alvoPag.current); setVirando('') }
@@ -284,7 +308,10 @@ export default function Album() {
         <div className="deck">
           <p className="mb-1.5 text-[11px] uppercase tracking-widest text-neutral-500">
             {deck.length > 0
-              ? 'arraste para o slot · toque para escolher qual repetida'
+              ? <>puxe para cima e solte no slot · toque para escolher qual repetida
+                  <span className="ml-2 text-neutral-600">
+                    {porTipoNoDeck.size} tipo(s) — role para o lado
+                  </span></>
               : 'nada para colar nesta página'}
           </p>
           <div className="deck-trilho">
