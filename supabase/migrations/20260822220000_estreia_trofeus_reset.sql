@@ -1,128 +1,8 @@
--- BELESMA figurinhas - delta a aplicar no SQL editor do Supabase.
--- So o que ainda NAO esta no banco. Idempotente: pode rodar duas vezes.
+-- BELESMA figurinhas - estreia por TIPO, trofeus do mundo, e reset de verdade
 
-begin;
-
--- ===== 20260822200000_ranking_criterios.sql =====
--- BELESMA figurinhas - criterios do ranking da cacada de serial
---
--- Chegou a existir aqui um multiplicador de venda por selo. Foi retirado: a
--- §19.4 diz "nunca vende copia selada" e continua valendo. O selo pontua no
--- ranking, que e onde ele deve valer - nao no caixa.
-
--- ================================================================ pontuacao
--- "A carta mais rara possivel" precisa de um criterio unico, senao cada
--- pessoa discute a sua. Este e o criterio, e ele esta a vista na tela:
---
---   raridade      tier_order (1 a 12), peso maior de todos
---   selo          rosa > preto > branco > nenhum
---   tiragem       quanto MENOR a tiragem, mais raro
---   serial        quanto MENOR o serial, mais cobicado; o 1/N vale extra
---   procedencia   puxada vale mais que forjada (supply paralelo)
---   conservacao   desgaste tira ponto
---
--- Os pesos sao ordens de grandeza separadas de proposito: raridade nunca
--- perde para selo, selo nunca perde para serial. Assim o ranking nao inverte
--- por acaso quando alguem junta muitas cartas medianas.
-create or replace function private.pontos_carta(
-  p_tier_order smallint, p_seal public.seal_type, p_print_run int,
-  p_serial int, p_origin public.copy_origin, p_damage int)
-returns numeric
-language sql immutable
-as $$
-  select
-      p_tier_order * 1000000
-    + (case p_seal when 'rosa' then 3 when 'preto' then 2 when 'branco' then 1 else 0 end) * 100000
-    + (case when p_print_run > 0 then least(50000, 50000.0 / p_print_run) else 0 end)
-    + (case when p_serial = 1 then 8000
-            when p_serial is null then 0
-            else greatest(0, 5000 - p_serial * 10) end)
-    + (case when p_origin = 'pull' then 2000 else 0 end)
-    - p_damage * 1500
-$$;
-
-create or replace function public.ranking_serial()
-returns jsonb
-language sql stable security definer
-set search_path = public, extensions, pg_temp
-as $$
-  with pontuadas as (
-    select cc.id, cc.owner_id, cc.serial_number, cc.seal, cc.origin, cc.forge_index,
-           cc.damage_level, cc.verify_code, cc.card_type_id,
-           ct.print_run, ct.tier, ct.tier_order, ct.skin, ch.slug, ch.name,
-           private.pontos_carta(ct.tier_order, cc.seal, ct.print_run,
-                                cc.serial_number, cc.origin, cc.damage_level) as pontos
-    from public.card_copies cc
-    join public.card_types ct on ct.id = cc.card_type_id
-    join public.characters ch on ch.id = ct.character_id
-    where cc.owner_id is not null and not cc.burned
-  ),
-  agregado as (
-    select owner_id,
-           count(*)                                            as copias,
-           count(*) filter (where seal <> 'none')               as selos,
-           count(*) filter (where serial_number = 1)            as unos,
-           min(serial_number) filter (where origin = 'pull')    as melhor_serial,
-           max(tier_order)                                      as melhor_tier,
-           round(sum(pontos) / 1000000.0, 1)                    as pontos_total
-    from pontuadas group by owner_id
-  )
-  select coalesce(jsonb_agg(jsonb_build_object(
-    'nickname', p.nickname,
-    'copias', a.copias, 'selos', a.selos, 'unos', a.unos,
-    'melhor_serial', a.melhor_serial,
-    'pontos', a.pontos_total,
-
-    -- os tres troféus, cada um com critério próprio e explícito
-    'joia',   (select to_jsonb(x) from (
-                select id as copy_id, serial_number, print_run, seal, origin, forge_index,
-                       damage_level, verify_code, card_type_id, tier, tier_order, skin,
-                       slug as character_slug, name as character_name
-                from pontuadas where owner_id = a.owner_id
-                order by pontos desc limit 1) x),
-    'menor_serial', (select to_jsonb(x) from (
-                select id as copy_id, serial_number, print_run, seal, origin, forge_index,
-                       damage_level, verify_code, card_type_id, tier, tier_order, skin,
-                       slug as character_slug, name as character_name
-                from pontuadas where owner_id = a.owner_id and origin = 'pull'
-                -- desempate: mesmo serial, ganha a de tiragem menor, depois a mais rara
-                order by serial_number, print_run, tier_order desc limit 1) x),
-    'melhor_selo', (select to_jsonb(x) from (
-                select id as copy_id, serial_number, print_run, seal, origin, forge_index,
-                       damage_level, verify_code, card_type_id, tier, tier_order, skin,
-                       slug as character_slug, name as character_name
-                from pontuadas where owner_id = a.owner_id and seal <> 'none'
-                order by case seal when 'rosa' then 3 when 'preto' then 2 else 1 end desc,
-                         tier_order desc, serial_number limit 1) x),
-
-    'destaques', (select coalesce(jsonb_agg(to_jsonb(x) order by x.pontos desc), '[]'::jsonb)
-                  from (
-                    select id as copy_id, serial_number, print_run, seal, origin, forge_index,
-                           damage_level, verify_code, card_type_id, tier, tier_order, skin,
-                           slug as character_slug, name as character_name, pontos
-                    from pontuadas where owner_id = a.owner_id
-                    order by pontos desc limit 8) x)
-  ) order by a.pontos_total desc), '[]'::jsonb)
-  from agregado a join public.players p on p.id = a.owner_id;
-$$;
-
-alter function public.ranking_serial() owner to postgres;
-grant execute on function public.ranking_serial() to anon, authenticated;
-
--- ===== 20260822210000_cascata_respeita_garantia.sql =====
--- BELESMA figurinhas - a cascata precisa respeitar a garantia do pacote
---
--- BUG: quando a tabela de hit inteira ficava sem estoque, o fallback
--- sorteava de QUALQUER tier com estoque - inclusive comum. Um pacote Ultra
--- podia entregar uma comum no slot de hit, quebrando "mitica ou melhor".
---
--- Medido com 1500 pacotes Ultra e o estoque alto esgotado: 120 pacotes
--- sairam abaixo da garantia e o qui-quadrado do slot de hit foi a 704.
---
--- A §8 diz "tier sem estoque desce um nivel e re-sorteia" e tambem que o
--- Raro garante epica+ e o Ultra garante mitica+. As duas frases so convivem
--- se a descida parar no piso da garantia. Abaixo dele o pacote sai MENOR e o
--- front avisa - que e a outra coisa que a §8 manda fazer.
+-- ================================================================ 1. estreia
+-- BUG reportado: toda carta saia marcada como ESTREIA MUNDIAL, mesmo quando
+-- o jogador ja tinha tres repetidas dela. Ver o comentario no jsonb abaixo.
 create or replace function public.open_pack(pack_type text)
 returns jsonb
 language plpgsql
@@ -430,7 +310,24 @@ begin
       'art_path', ct.art_path,
       'character_slug', ch.slug,
       'character_name', ch.name,
-      'estreia_mundial', cc.first_discovered_by = v_uid and cc.first_discovered_at >= now() - interval '1 minute',
+      -- Estreia mundial e do TIPO, nao da COPIA.
+      --
+      -- first_discovered_at existe por copia: puxar a copia 47/250 de um
+      -- tipo que ja circula ha semanas gravava a data NELA pela primeira
+      -- vez, e a versao anterior lia isso como estreia. Resultado: toda
+      -- carta do pacote saia com a faixa, ate as que o jogador ja tinha
+      -- repetida. Agora so e estreia se nenhuma outra copia do mesmo tipo
+      -- saiu antes.
+      'estreia_mundial',
+          cc.first_discovered_by = v_uid
+          and cc.first_discovered_at >= now() - interval '1 minute'
+          and not exists (
+            select 1 from public.card_copies anterior
+            where anterior.card_type_id = cc.card_type_id
+              and anterior.id <> cc.id
+              and anterior.first_discovered_at is not null
+              and anterior.first_discovered_at < cc.first_discovered_at
+          ),
       'nova', not exists (
         select 1 from public.card_copies o
         where o.card_type_id = cc.card_type_id and o.owner_id = v_uid and o.id <> cc.id
@@ -450,4 +347,144 @@ $$;
 alter function public.open_pack(text) owner to postgres;
 grant execute on function public.open_pack(text) to authenticated;
 
-commit;
+-- ================================================================ 2. trofeus do mundo
+-- Os tres trofeus do SERVIDOR, com o dono de cada um.
+--
+-- Mesmos criterios da versao por jogador (private.pontos_carta): se o
+-- criterio fosse outro aqui, o campeao do servidor poderia nao ser campeao
+-- de ninguem, e o ranking viraria discussao.
+create or replace function public.trofeus_do_mundo()
+returns jsonb
+language sql stable security definer
+set search_path = public, extensions, pg_temp
+as $$
+  with pontuadas as (
+    select cc.id as copy_id, cc.serial_number, cc.seal, cc.origin, cc.forge_index,
+           cc.damage_level, cc.verify_code, cc.card_type_id,
+           ct.print_run, ct.tier, ct.tier_order, ct.skin,
+           ch.slug as character_slug, ch.name as character_name,
+           p.nickname as dono,
+           private.pontos_carta(ct.tier_order, cc.seal, ct.print_run,
+                                cc.serial_number, cc.origin, cc.damage_level) as pontos
+    from public.card_copies cc
+    join public.card_types ct on ct.id = cc.card_type_id
+    join public.characters ch on ch.id = ct.character_id
+    join public.players p on p.id = cc.owner_id
+    where cc.owner_id is not null and not cc.burned
+  )
+  select jsonb_build_object(
+    'joia', (select to_jsonb(x) from (
+              select * from pontuadas order by pontos desc, copy_id limit 1) x),
+    'menor_serial', (select to_jsonb(x) from (
+              select * from pontuadas where origin = 'pull'
+              -- desempate: mesmo serial, ganha a de tiragem menor, depois a mais rara
+              order by serial_number, print_run, tier_order desc, copy_id limit 1) x),
+    'melhor_selo', (select to_jsonb(x) from (
+              select * from pontuadas where seal <> 'none'
+              order by case seal when 'rosa' then 3 when 'preto' then 2 else 1 end desc,
+                       tier_order desc, serial_number, copy_id limit 1) x),
+    'em_jogo', (select count(*) from pontuadas),
+    'donos',   (select count(distinct dono) from pontuadas)
+  );
+$$;
+
+alter function public.trofeus_do_mundo() owner to postgres;
+grant execute on function public.trofeus_do_mundo() to anon, authenticated;
+
+-- ================================================================ 3. recomecar do zero
+-- O admin_reset_all_collections devolve as cartas ao pool e para por ai:
+-- booster, baba, desgaste, estreia mundial, album e historico ficam todos de
+-- pe. Serve para redistribuir o acervo, nao para recomecar.
+--
+-- Este aqui recomeca de verdade: depois dele o mundo esta como no dia da
+-- estreia, com uma excecao deliberada - o admin_log NAO e apagado. Ele e o
+-- registro de quem mexeu no que (§18), e um reset que apaga o proprio
+-- rastro nao e auditavel. O reset fica gravado la.
+--
+-- O que NAO muda porque nao e estado de jogo: os selos continuam nas mesmas
+-- copias (36 brancos, 12 pretos, 3 rosas), o seal_audit continua provando
+-- como foram sorteados, e o nickname_history continua.
+create or replace function public.admin_recomecar_do_zero(p_confirmacao text)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_forjadas   int;
+  v_devolvidas int;
+  v_jogadores  int;
+  v_estreias   int;
+  v_ch         record;
+begin
+  perform private.require_admin();
+  if p_confirmacao <> 'RECOMECAR DO ZERO' then
+    raise exception 'confirmacao invalida: digite RECOMECAR DO ZERO';
+  end if;
+
+  -- ------------------------------------------------------------ historico
+  delete from public.trades;
+  delete from public.trade_rewards;
+  delete from public.album_colagem;
+  delete from public.pack_opening_cards;
+  delete from public.pack_openings;
+  delete from public.copy_history;
+  delete from public.baba_log;
+
+  -- ------------------------------------------------------------ acervo
+  -- Forjada nao existe no mundo do dia zero: ela e supply criado por
+  -- jogador. Some de vez, nao volta ao pool.
+  delete from public.card_copies where origin = 'forge';
+  get diagnostics v_forjadas = row_count;
+
+  select count(*) into v_estreias
+  from public.card_copies where first_discovered_at is not null;
+
+  update public.card_copies
+  set owner_id = null,
+      claimed_at = null,
+      burned = false,
+      damage_level = 0,
+      first_discovered_at = null,
+      first_discovered_by = null,
+      reserved_for_daily = false;
+  get diagnostics v_devolvidas = row_count;
+
+  -- ------------------------------------------------------------ jogadores
+  update public.players set
+    packs_common       = (select valor from public.pack_params where chave = 'allotment_comum')::int,
+    packs_rare         = (select valor from public.pack_params where chave = 'allotment_raro')::int,
+    packs_ultra        = (select valor from public.pack_params where chave = 'allotment_ultra')::int,
+    packs_common_daily = 0,
+    packs_rare_daily   = 0,
+    packs_ultra_daily  = 0,
+    baba               = 0,
+    pity_counter       = 0,
+    dailies_claimed    = 0,
+    last_daily_at      = null,
+    showcase_1 = null, showcase_2 = null, showcase_3 = null;
+  get diagnostics v_jogadores = row_count;
+
+  -- ------------------------------------------------------------ reserva diaria
+  -- Zerada junto com o resto acima; refeita aqui com o mesmo alvo do seed.
+  for v_ch in select id from public.characters order by id loop
+    perform private.reservar_diario(v_ch.id, 500);
+  end loop;
+
+  perform private.registrar('admin_recomecar_do_zero', 'mundo',
+    jsonb_build_object('forjadas_apagadas', v_forjadas,
+                       'copias_devolvidas', v_devolvidas,
+                       'estreias_apagadas', v_estreias,
+                       'jogadores_zerados', v_jogadores));
+
+  return jsonb_build_object(
+    'forjadas_apagadas', v_forjadas,
+    'copias_devolvidas', v_devolvidas,
+    'estreias_apagadas', v_estreias,
+    'jogadores_zerados', v_jogadores,
+    'reservadas_para_diario',
+      (select count(*) from public.card_copies where reserved_for_daily));
+end;
+$$;
+
+alter function public.admin_recomecar_do_zero(text) owner to postgres;
+grant execute on function public.admin_recomecar_do_zero(text) to authenticated;

@@ -576,6 +576,7 @@ function Perigo() {
   const [conf, setConf] = useState('')
   const [confTudo, setConfTudo] = useState('')
   const [confApagar, setConfApagar] = useState('')
+  const [confZero, setConfZero] = useState('')
   const [alvoApagar, setAlvoApagar] = useState('')
   const [totalComDono, setTotalComDono] = useState(0)
 
@@ -594,9 +595,10 @@ function Perigo() {
     <div className="space-y-6 text-sm">
       <Aviso />
       <p className="rounded border border-red-900 bg-red-950/30 p-3 text-red-300">
-        Nada aqui apaga <code>card_types</code> nem <code>characters</code> — só posse. Cópias puxadas
-        voltam ao pool com serial e selo intactos; forjadas são queimadas. A estreia mundial é
-        história e não se apaga.
+        Os dois resets de cima mexem só em <strong>posse</strong>: cópias puxadas voltam ao pool
+        com serial, selo e desgaste intactos, forjadas são queimadas, e booster, baba e estreia
+        mundial ficam de pé. <strong>Recomeçar do zero</strong> é outra coisa — leia o bloco.
+        Nada aqui apaga <code>card_types</code> nem <code>characters</code>.
       </p>
 
       <Bloco titulo="Resetar a coleção de um jogador"
@@ -621,6 +623,43 @@ function Perigo() {
           if (await rodar(() => supabase.rpc('admin_reset_all_collections', { p_confirmacao: 'RESETAR' }),
             (n) => `${n} cópias devolvidas ao pool`)) { setConfTudo(''); carregar() }
         }}>resetar tudo</button>
+      </Bloco>
+
+      {/* O "resetar tudo" acima nunca resetou tudo: booster, baba, desgaste,
+          estreia mundial, album e historico continuavam de pe. Este aqui
+          recomeca de verdade. */}
+      <Bloco titulo="Recomeçar do zero"
+        afetadas="o mundo volta ao dia da estreia — este é o botão que apaga tudo">
+        <div className="w-full">
+          <ul className="mb-2 grid gap-x-6 gap-y-0.5 text-xs text-neutral-400 sm:grid-cols-2">
+            <li>· todas as cópias voltam ao pool, <strong>sem desgaste</strong></li>
+            <li>· <strong>booster de volta ao inicial</strong>: 12 comuns, 5 raros, 2 ultra</li>
+            <li>· baba, pity, streak e cooldown do diário zerados</li>
+            <li>· forjadas apagadas de vez (não são do mundo do dia zero)</li>
+            <li>· <strong>toda estreia mundial apagada</strong> — dá para descobrir de novo</li>
+            <li>· álbum, vitrines, trocas, extrato e histórico apagados</li>
+            <li>· reserva do diário refeita (1500)</li>
+            <li>· selos ficam onde estão: 36 brancos, 12 pretos, 3 rosas</li>
+          </ul>
+          <p className="mb-2 text-xs text-neutral-500">
+            O <code>admin_log</code> <strong>não</strong> é apagado: um reset que some com o próprio
+            rastro não é auditável. Esta ação fica gravada lá.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input placeholder="digite RECOMECAR DO ZERO" value={confZero}
+              onChange={(e) => setConfZero(e.target.value)} className={`${campo} w-64`} />
+            <button className={perigoso} disabled={confZero !== 'RECOMECAR DO ZERO'}
+              onClick={async () => {
+                if (await rodar(
+                  () => supabase.rpc('admin_recomecar_do_zero', { p_confirmacao: 'RECOMECAR DO ZERO' }),
+                  (r: any) => `mundo reiniciado: ${r.copias_devolvidas} cópias ao pool, ` +
+                              `${r.estreias_apagadas} estreias apagadas, ` +
+                              `${r.forjadas_apagadas} forjadas removidas, ` +
+                              `${r.jogadores_zerados} jogadores zerados`,
+                )) { setConfZero(''); carregar() }
+              }}>recomeçar do zero</button>
+          </div>
+        </div>
       </Bloco>
 
       <Bloco titulo="Apagar um jogador"

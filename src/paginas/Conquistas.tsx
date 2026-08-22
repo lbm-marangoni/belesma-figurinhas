@@ -33,6 +33,52 @@ type Rank = {
   melhor_selo: Carta | null
   destaques: Carta[]
 }
+/** Troféu do servidor: a mesma carta, mais o nome de quem tem. */
+type CartaComDono = Carta & { dono: string }
+type Mundo = {
+  joia: CartaComDono | null
+  menor_serial: CartaComDono | null
+  melhor_selo: CartaComDono | null
+  em_jogo: number
+  donos: number
+}
+
+/** Os três troféus, sempre nesta ordem e com o mesmo rótulo nas duas abas. */
+const TROFEUS: [keyof Pick<Mundo, 'joia' | 'menor_serial' | 'melhor_selo'>, string, string][] = [
+  ['joia',         'a joia',       'a mais rara possível'],
+  ['menor_serial', 'menor serial', 'o número mais baixo'],
+  ['melhor_selo',  'melhor selo',  'rosa > preto > branco'],
+]
+
+/**
+ * Uma vaga de troféu.
+ *
+ * A largura e travada: sem `max-w` as tres ocupavam um terco da pagina cada
+ * e a carta saia do tamanho de um poster, maior que o proprio acervo logo
+ * abaixo.
+ */
+function Trofeu({ rotulo, criterio, carta, dono, aoAbrir }: {
+  rotulo: string; criterio?: string
+  carta: Carta | null; dono?: string | null
+  aoAbrir: (c: Carta) => void
+}) {
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <span className="text-[10px] uppercase tracking-widest text-neutral-500">{rotulo}</span>
+      {carta ? (
+        <button onClick={() => aoAbrir(carta)} className="w-full max-w-[7.5rem]"
+          title={`${carta.character_name} · ${carta.skin}`}>
+          <Figurinha carta={carta} tamanho="miniatura" />
+        </button>
+      ) : (
+        <span className="grid aspect-[3/4] w-full max-w-[7.5rem] place-items-center rounded
+                         border border-dashed border-neutral-800 text-xs text-neutral-700">—</span>
+      )}
+      {dono && <span className="text-xs font-medium text-neutral-300">{dono}</span>}
+      {criterio && <span className="text-[10px] text-neutral-600">{criterio}</span>}
+    </div>
+  )
+}
 
 /**
  * Miniatura do TIPO, não de uma cópia. O índice global fala de tipos — não
@@ -71,18 +117,23 @@ export default function Conquistas() {
   const [rank, setRank] = useState<Rank[]>([])
   const [vitrines, setVitrines] = useState<{ nickname: string; cartas: Carta[] }[]>([])
   const [aberto, setAberto] = useState<string | null>(null)
+  const [mundo, setMundo] = useState<Mundo | null>(null)
+  const [aba, setAba] = useState<'mundo' | 'jogadores'>('mundo')
+  const [vitrineAberta, setVitrineAberta] = useState<string | null>(null)
 
   useEffect(() => {
     ;(async () => {
-      const [gi, pa, rk, ps] = await Promise.all([
+      const [gi, pa, rk, tm, ps] = await Promise.all([
         supabase.rpc('global_index'),
         supabase.rpc('pares_de_aura'),
         supabase.rpc('ranking_serial'),
+        supabase.rpc('trofeus_do_mundo'),
         supabase.from('players_public').select('nickname, showcase_1, showcase_2, showcase_3'),
       ])
       setIndice(gi.data as Indice)
       setPares((pa.data ?? []) as Par[])
       setRank((rk.data ?? []) as Rank[])
+      setMundo(tm.data as Mundo)
 
       const ids = (ps.data ?? []).flatMap((p) => [p.showcase_1, p.showcase_2, p.showcase_3]).filter(Boolean)
       const mapa = new Map<number, Carta>()
@@ -225,54 +276,78 @@ export default function Conquistas() {
 
       {/* ------------------------------------------------------ caçada */}
       <section>
-        <h2 className="text-lg font-semibold tracking-tight">Caçada de serial</h2>
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          <h2 className="text-lg font-semibold tracking-tight">Caçada de serial</h2>
+          {/* Duas abas porque sao duas perguntas diferentes: "quem tem a
+              melhor do servidor" e "qual a melhor de cada um". Antes so a
+              segunda existia, e para achar a campea geral era preciso
+              comparar as fileiras no olho. */}
+          <div className="flex rounded-lg border border-neutral-800 p-0.5 text-xs">
+            {([['mundo', 'do servidor'], ['jogadores', 'por jogador']] as const).map(([id, r]) => (
+              <button key={id} onClick={() => setAba(id)}
+                className={`rounded-md px-3 py-1 transition-colors ${
+                  aba === id ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}>
+                {r}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <p className="mb-3 max-w-3xl text-xs leading-relaxed text-neutral-500">
-          Três troféus por jogador, cada um com critério próprio e fixo — se
-          alguém tem duas candidatas, o desempate é sempre o mesmo.{' '}
-          <strong className="text-neutral-400">A joia</strong> é a carta mais
-          rara possível: raridade acima de tudo, depois selo, depois tiragem,
-          depois serial, com desgaste descontando e puxada valendo mais que
-          forjada. <strong className="text-neutral-400">Menor serial</strong>{' '}
-          empata pela tiragem menor e depois pela raridade.{' '}
-          <strong className="text-neutral-400">Melhor selo</strong> vai de rosa
-          a branco e empata pela raridade.
+          Critério fixo, igual nas duas abas — se houver duas candidatas, o
+          desempate é sempre o mesmo.{' '}
+          <strong className="text-neutral-400">A joia</strong> é a mais rara possível:
+          raridade acima de tudo, depois selo, tiragem e serial, com desgaste
+          descontando e puxada valendo mais que forjada.{' '}
+          <strong className="text-neutral-400">Menor serial</strong> empata pela
+          tiragem menor e depois pela raridade.{' '}
+          <strong className="text-neutral-400">Melhor selo</strong> vai de rosa a
+          branco e empata pela raridade.
         </p>
-        <div className="space-y-2">
-          {rank.map((r) => {
-            const trofeus: [string, Carta | null][] = [
-              ['a joia', r.joia], ['menor serial', r.menor_serial], ['melhor selo', r.melhor_selo],
-            ]
-            return (
+
+        {/* ---------------------------------------------------- do servidor */}
+        {aba === 'mundo' && (
+          mundo ? (
+            <div className="rounded border border-neutral-800">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm">
+                <span className="font-medium">As três do servidor</span>
+                <span className="chip">{mundo.em_jogo} cópias em jogo</span>
+                <span className="chip">{mundo.donos} donos</span>
+                <span className="ml-auto text-xs text-neutral-600">
+                  o melhor de tudo que existe hoje
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-3 border-t border-neutral-900 px-3 py-4">
+                {TROFEUS.map(([chave, rotulo, criterio]) => (
+                  <Trofeu key={chave} rotulo={rotulo} criterio={criterio}
+                    carta={mundo[chave]} dono={mundo[chave]?.dono}
+                    aoAbrir={(c) => setEmFoco({ lista: [c], i: 0 })} />
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-neutral-600">ninguém tem figurinha ainda</p>
+          )
+        )}
+
+        {/* ---------------------------------------------------- por jogador */}
+        {aba === 'jogadores' && (
+          <div className="space-y-2">
+            {rank.map((r) => (
               <div key={r.nickname} className="rounded border border-neutral-800">
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm">
                   <span className="font-medium">{r.nickname}</span>
                   <span className="chip"><strong>{r.pontos}</strong> pts</span>
                   <span className="chip"><strong>{r.selos}</strong> selos</span>
                   <span className="chip"><strong>{r.unos}</strong> nº 1</span>
-                  <span className="chip">
-                    melhor serial <strong>{r.melhor_serial ?? '—'}</strong>
-                  </span>
+                  <span className="chip">melhor serial <strong>{r.melhor_serial ?? '—'}</strong></span>
                   <span className="ml-auto text-neutral-500">{r.copias} cópias</span>
                 </div>
 
-                {/* os três troféus, cada um rotulado com o porquê */}
-                <div className="grid grid-cols-3 gap-2 border-t border-neutral-900 px-3 py-3">
-                  {trofeus.map(([rotulo, c]) => (
-                    <div key={rotulo} className="flex flex-col items-center gap-1">
-                      <span className="text-[10px] uppercase tracking-widest text-neutral-500">
-                        {rotulo}
-                      </span>
-                      {c ? (
-                        <button onClick={() => setEmFoco({ lista: [c], i: 0 })}
-                          title={`${c.character_name} · ${c.skin}`}>
-                          <Figurinha carta={c} tamanho="miniatura" />
-                        </button>
-                      ) : (
-                        <span className="grid aspect-[3/4] w-full max-w-[86px] place-items-center
-                                         rounded border border-dashed border-neutral-800
-                                         text-xs text-neutral-700">—</span>
-                      )}
-                    </div>
+                <div className="grid grid-cols-3 gap-3 border-t border-neutral-900 px-3 py-3">
+                  {TROFEUS.map(([chave, rotulo]) => (
+                    <Trofeu key={chave} rotulo={rotulo} carta={r[chave]}
+                      aoAbrir={(c) => setEmFoco({ lista: [c], i: 0 })} />
                   ))}
                 </div>
 
@@ -288,10 +363,10 @@ export default function Conquistas() {
                   </div>
                 )}
               </div>
-            )
-          })}
-          {rank.length === 0 && <p className="text-sm text-neutral-600">ninguém tem figurinha ainda</p>}
-        </div>
+            ))}
+            {rank.length === 0 && <p className="text-sm text-neutral-600">ninguém tem figurinha ainda</p>}
+          </div>
+        )}
       </section>
 
       {/* ------------------------------------------------------ vitrines */}
@@ -310,26 +385,52 @@ export default function Conquistas() {
             escolha 3 figurinhas no Perfil.
           </Link>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
-            {vitrines.map((v) => (
-              <div key={v.nickname} className="rounded border border-neutral-800 p-3">
-                <p className="mb-2 flex items-center justify-between text-sm font-medium">
-                  {v.nickname}
-                  {v.nickname === jogador?.nickname && (
-                    <Link to="/perfil" className="text-xs font-normal text-neutral-500 underline">
-                      editar
-                    </Link>
+          <div className="space-y-1.5">
+            {/* Uma por vez. Oito vitrines abertas de uma vez viram 24
+                figurinhas na tela e ninguem olha nenhuma; assim a pessoa
+                escolhe qual quer ver. A sua ja abre aberta. */}
+            {vitrines.map((v) => {
+              const abertaAqui = (vitrineAberta ?? jogador?.nickname) === v.nickname
+              return (
+                <div key={v.nickname} className="rounded border border-neutral-800">
+                  <button
+                    onClick={() => setVitrineAberta(abertaAqui ? '' : v.nickname)}
+                    aria-expanded={abertaAqui}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm
+                               hover:bg-neutral-900/60"
+                  >
+                    <span className={`text-neutral-600 transition-transform ${abertaAqui ? 'rotate-90' : ''}`}>
+                      ›
+                    </span>
+                    <span className="font-medium">{v.nickname}</span>
+                    {v.nickname === jogador?.nickname && (
+                      <span className="text-[10px] uppercase tracking-widest text-neutral-600">você</span>
+                    )}
+                    <span className="ml-auto text-xs text-neutral-600">
+                      {v.cartas.length} {v.cartas.length === 1 ? 'figurinha' : 'figurinhas'}
+                    </span>
+                  </button>
+
+                  {abertaAqui && (
+                    <div className="border-t border-neutral-900 px-3 py-3">
+                      <div className="grid max-w-md grid-cols-3 gap-2">
+                        {v.cartas.map((c, i) => (
+                          <button key={c.copy_id} onClick={() => setEmFoco({ lista: v.cartas, i })}>
+                            <Figurinha carta={c} tamanho="miniatura" />
+                          </button>
+                        ))}
+                      </div>
+                      {v.nickname === jogador?.nickname && (
+                        <Link to="/perfil"
+                          className="mt-2 inline-block text-xs text-neutral-500 underline underline-offset-2">
+                          trocar as minhas
+                        </Link>
+                      )}
+                    </div>
                   )}
-                </p>
-                <div className="grid grid-cols-3 gap-2">
-                  {v.cartas.map((c, i) => (
-                    <button key={c.copy_id} onClick={() => setEmFoco({ lista: v.cartas, i })}>
-                      <Figurinha carta={c} tamanho="miniatura" />
-                    </button>
-                  ))}
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </section>
