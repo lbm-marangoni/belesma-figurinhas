@@ -105,7 +105,7 @@ insert into public.card_copies (card_type_id, serial_number, verify_code)
 select ct.id,
        s,
        upper(substr(
-         encode(digest('belesma-v1|' || ch.slug || '|' || ct.skin || '|' || s::text, 'sha256'), 'hex'),
+         encode(extensions.digest('belesma-v1|' || ch.slug || '|' || ct.skin || '|' || s::text, 'sha256'), 'hex'),
          1, 10))
 from public.card_types ct
 join public.characters ch on ch.id = ct.character_id

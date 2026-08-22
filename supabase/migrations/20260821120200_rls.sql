@@ -8,6 +8,14 @@
 -- authenticated. Por isso o REVOKE abaixo nao e decorativo: sem ele, a RLS
 -- ficaria por cima de GRANTs abertos.
 
+-- service_role e o papel de servidor de confianca: bypassa RLS e precisa de
+-- GRANT explicito. O Supabase concede por default, mas essa configuracao vive
+-- presa ao schema - se alguem recriar o schema public, ela some junto e o
+-- painel e os scripts administrativos param de enxergar as tabelas.
+-- Conceder aqui torna a migracao autossuficiente.
+-- A chave de service_role NUNCA vai para o navegador.
+grant usage on schema public to postgres, anon, authenticated, service_role;
+
 revoke all on all tables    in schema public from anon, authenticated;
 revoke all on all sequences in schema public from anon, authenticated;
 revoke all on all functions in schema public from anon, authenticated;
@@ -122,9 +130,10 @@ grant select on public.baba_log to authenticated;
 drop policy if exists admin_log_leitura on public.admin_log;
 create policy admin_log_leitura on public.admin_log
   for select to authenticated
-  using (exists (select 1 from public.players p where p.id = auth.uid() and p.is_admin));
+  using (public.sou_admin());
 
 grant select on public.admin_log to authenticated;
+grant execute on function public.sou_admin() to authenticated;
 
 -- ================================================================ auditoria de pacote
 drop policy if exists pack_openings_leitura on public.pack_openings;
@@ -152,3 +161,15 @@ grant select on public.album_page_rewards to authenticated;
 
 -- trade_rewards e trava interna: ninguem le, ninguem escreve, so as RPCs.
 -- Sem policy e sem grant de proposito.
+
+-- ================================================================ service_role
+-- Depois de todos os REVOKE acima, devolve tudo ao papel de servidor.
+grant all on all tables     in schema public to service_role;
+grant all on all sequences  in schema public to service_role;
+grant all on all functions  in schema public to service_role;
+grant usage on schema private to service_role;
+grant all on all functions in schema private to service_role;
+
+alter default privileges in schema public grant all on tables    to service_role;
+alter default privileges in schema public grant all on sequences to service_role;
+alter default privileges in schema public grant all on functions to service_role;

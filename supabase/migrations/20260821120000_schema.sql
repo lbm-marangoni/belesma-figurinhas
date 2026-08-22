@@ -5,8 +5,18 @@
 --   - o cliente nunca escreve em card_copies, players, trades ou baba
 --   - nao existe admin_key: a guarda e players.is_admin, checada no banco
 
-create extension if not exists citext;
-create extension if not exists pgcrypto;
+-- pgcrypto e citext: no Supabase eles moram no schema "extensions"; num
+-- Postgres cru (e no PGlite do harness) cairiam em "public". Fixamos os dois
+-- em "extensions" nos dois ambientes para que um unico search_path sirva.
+--
+-- Isto NAO e detalhe: as funcoes abaixo tem "set search_path" explicito, que
+-- e obrigatorio em security definer. Sem "extensions" nessa lista,
+-- gen_random_bytes() nao resolve e o sorteio de selo quebra - foi exatamente
+-- o que aconteceu na primeira tentativa de deploy.
+create schema if not exists extensions;
+create extension if not exists citext   with schema extensions;
+create extension if not exists pgcrypto with schema extensions;
+grant usage on schema extensions to public;
 
 create schema if not exists private;
 
@@ -57,7 +67,7 @@ create table if not exists public.skins (
 -- ---------------------------------------------------------------- characters
 create table if not exists public.characters (
   id              serial primary key,
-  slug            citext not null unique,
+  slug            extensions.citext not null unique,
   name            text   not null,
   display_order   int    not null,
   palette_primary text   not null,
@@ -95,7 +105,7 @@ create index if not exists card_types_tier_idx      on public.card_types(tier);
 -- ---------------------------------------------------------------- players
 create table if not exists public.players (
   id                  uuid primary key references auth.users(id) on delete cascade,
-  nickname            citext not null unique,
+  nickname            extensions.citext not null unique,
 
   -- allotment inicial (secao 8): 12 comuns, 5 raros, 2 ultra
   packs_common        int not null default 0 check (packs_common       >= 0),
@@ -324,6 +334,7 @@ create or replace function private.random_int(n int)
 returns int
 language plpgsql
 volatile
+set search_path = public, extensions, pg_temp
 as $$
 declare
   limite bigint;
@@ -353,7 +364,7 @@ returns void
 language plpgsql
 stable
 security definer
-set search_path = public, pg_temp
+set search_path = public, extensions, pg_temp
 as $$
 begin
   if not exists (
@@ -384,7 +395,7 @@ returns void
 language plpgsql
 volatile
 security definer
-set search_path = public, pg_temp
+set search_path = public, extensions, pg_temp
 as $fn$
 declare
   n_total int;
@@ -442,7 +453,7 @@ returns int
 language plpgsql
 volatile
 security definer
-set search_path = public, pg_temp
+set search_path = public, extensions, pg_temp
 as $fn$
 declare
   ja_tem int;
@@ -477,6 +488,22 @@ begin
 end;
 $fn$;
 
+-- Mesma guarda, em forma de boolean, para usar DENTRO de policy.
+--
+-- Precisa ser security definer: uma policy e avaliada com os privilegios de
+-- quem consulta, e authenticated nao tem SELECT em players. Escrever o
+-- "exists (select 1 from players ...)" direto na policy negava ate para admin
+-- de verdade - o erro saia como "permission denied for table players".
+create or replace function public.sou_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+  select exists (select 1 from public.players where id = auth.uid() and is_admin);
+$$;
+
 -- Secao 9: o proprio jogador precisa ler baba, pacotes e pity, que nao sao
 -- publicos. A leitura da linha inteira passa por aqui, nunca por GRANT.
 create or replace function public.me()
@@ -484,7 +511,7 @@ returns public.players
 language sql
 stable
 security definer
-set search_path = public, pg_temp
+set search_path = public, extensions, pg_temp
 as $$
   select * from public.players where id = auth.uid();
 $$;
@@ -501,4 +528,5 @@ create or replace view public.players_public as
 -- Explicito para nao virar acidente: me() e a view so enxergam a tabela
 -- porque rodam como o dono. Trocar o dono para um papel comum quebra as duas.
 alter function public.me() owner to postgres;
+alter function public.sou_admin() owner to postgres;
 alter view public.players_public owner to postgres;
