@@ -422,13 +422,22 @@ begin
   end if;
 
   -- ------------------------------------------------------------ historico
-  delete from public.trades;
-  delete from public.trade_rewards;
-  delete from public.album_colagem;
-  delete from public.pack_opening_cards;
-  delete from public.pack_openings;
-  delete from public.copy_history;
-  delete from public.baba_log;
+  --
+  -- `where true` em tudo aqui NAO e enfeite: o Supabase liga o safeupdate
+  -- (supautils), que recusa DELETE e UPDATE sem clausula WHERE com
+  -- "DELETE requires a WHERE clause". Vale para security definer tambem,
+  -- porque a trava e da sessao, nao do dono da funcao. Sem isto a funcao
+  -- roda no PGlite e falha no Supabase - foi exatamente o que aconteceu.
+  --
+  -- Nao remover "porque nao filtra nada". Ele filtra: declara que apagar
+  -- tudo e intencional.
+  delete from public.trades           where true;
+  delete from public.trade_rewards    where true;
+  delete from public.album_colagem    where true;
+  delete from public.pack_opening_cards where true;
+  delete from public.pack_openings    where true;
+  delete from public.copy_history     where true;
+  delete from public.baba_log         where true;
 
   -- ------------------------------------------------------------ acervo
   -- Forjada nao existe no mundo do dia zero: ela e supply criado por
@@ -446,7 +455,8 @@ begin
       damage_level = 0,
       first_discovered_at = null,
       first_discovered_by = null,
-      reserved_for_daily = false;
+      reserved_for_daily = false
+  where true;                                   -- safeupdate, ver acima
   get diagnostics v_devolvidas = row_count;
 
   -- ------------------------------------------------------------ jogadores
@@ -461,7 +471,8 @@ begin
     pity_counter       = 0,
     dailies_claimed    = 0,
     last_daily_at      = null,
-    showcase_1 = null, showcase_2 = null, showcase_3 = null;
+    showcase_1 = null, showcase_2 = null, showcase_3 = null
+  where true;                                   -- safeupdate, ver acima
   get diagnostics v_jogadores = row_count;
 
   -- ------------------------------------------------------------ reserva diaria

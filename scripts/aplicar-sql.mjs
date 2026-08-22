@@ -22,4 +22,6 @@ const r = await fetch(`https://api.supabase.com/v1/projects/${REF}/database/quer
 })
 const corpo = await r.text()
 if (!r.ok) { console.error(`HTTP ${r.status}\n${corpo}`); process.exit(1) }
-console.log(`ok (${r.status})`, corpo.slice(0, 300))
+// truncar a resposta escondia auditorias inteiras; o limite agora e opcional
+const limite = Number(process.env.SQL_MAX ?? 0)
+console.log(`ok (${r.status})`, limite > 0 ? corpo.slice(0, limite) : corpo)

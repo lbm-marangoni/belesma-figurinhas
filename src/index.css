@@ -153,22 +153,11 @@ h1, h2, h3 { letter-spacing: -0.015em; }
  * pacote no ônibus. Estas regras são sobre alcance do polegar e sobre nada
  * vazar para os lados. */
 @media (max-width: 640px) {
-  /* a barra de cima vira duas linhas: marca + saldo em cima, abas rolando
-     embaixo. Espremer tudo numa linha só deixava as abas com 30px. */
-  .topo {
-    flex-wrap: wrap;
-    padding: .45rem .6rem;
-    gap: .25rem .4rem;
-  }
-  .topo nav {
-    order: 3;
-    width: 100%;
-    margin-inline: -.6rem;
-    padding-inline: .6rem;
-    padding-bottom: .1rem;
-    scrollbar-width: none;
-  }
-  .topo nav::-webkit-scrollbar { display: none; }
+  /* A barra de cima e as abas moram em navegacao.css, num @media de 767px.
+     Aqui existiam regras concorrentes num @media de 640px: entre 641 e 767
+     as duas valiam pela metade, e o mesmo nome de classe em dois arquivos
+     com breakpoints diferentes foi o que produziu o desastre do `.folha`.
+     Um dono so, por elemento. */
 
   /* alvo de toque mínimo: 40px de altura em tudo que se clica */
   .aba   { padding: .5rem .6rem; font-size: .9rem; }

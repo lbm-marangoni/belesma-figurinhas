@@ -77,14 +77,25 @@ const estadoCanal = await new Promise((r) => {
 })
 checar('canal de realtime conectou', estadoCanal === 'SUBSCRIBED', estadoCanal)
 
+// SUBSCRIBED e o ack do CLIENTE. A assinatura de replicacao do lado do
+// servidor pode levar mais um instante, e propor a troca nesse intervalo faz
+// o evento nascer antes de ter quem escute. Um respiro tira essa corrida.
+await new Promise((r) => setTimeout(r, 1500))
+
 const { data: pAviso, error: eAviso } = await cli.troca1.c.rpc('propose_trade', {
   p_offered_copy_id: alvo, p_offered_baba: 0, p_requested_copy_id: doDois, p_requested_baba: 0,
 })
 checar('proposta criada por HTTP', !eAviso && !!pAviso?.id, eAviso?.message)
 // o Realtime respeita a RLS: so chega para quem e parte da troca
-for (let i = 0; i < 24 && recebeu === null; i++) await new Promise((r) => setTimeout(r, 500))
+// 30s, nao 12: o servico de Realtime as vezes acorda frio e a primeira
+// mensagem do dia demora. Falhou uma vez em quatro com 12s - e teste que
+// falha as vezes some com a diferenca entre bug e ruido.
+let esperou = 0
+for (let i = 0; i < 60 && recebeu === null; i++) {
+  await new Promise((r) => setTimeout(r, 500)); esperou += 0.5
+}
 checar('o destinatario recebeu o evento de realtime', recebeu !== null,
-  recebeu ? `trade ${recebeu.id}` : 'nenhum evento em 12s')
+  recebeu ? `trade ${recebeu.id} em ${esperou}s` : `nada em 30s (canal: ${estadoCanal})`)
 await cli.troca2.c.removeChannel(canal)
 
 // limpa para a corrida

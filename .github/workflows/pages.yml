@@ -30,6 +30,8 @@ jobs:
       - run: npm run verificar:fase5
       - run: npm run verificar:fase6
       - run: npm run verificar:fase7
+      - run: npm run verificar:estatico
+      - run: npm run verificar:safeupdate
       - run: npm run verificar:estreia
       - run: npm run verificar:odds
       - run: npm run build

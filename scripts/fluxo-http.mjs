@@ -77,8 +77,30 @@ checar('toda carta traz art_path e serial',
   r.cartas.every((x) => x.art_path && x.serial_number > 0 && x.print_run > 0))
 checar('reveal_index veio embaralhado do servidor',
   new Set(r.cartas.map((x) => x.reveal_index)).size === r.cartas.length)
-checar('a primeira abertura marca estreia mundial',
-  r.cartas.some((x) => x.estreia_mundial === true))
+// ESTREIA MUNDIAL e do TIPO, nao da copia nem do jogador.
+//
+// A versao anterior exigia que a PRIMEIRA abertura de um jogador novo
+// estreasse algo. Isso so valia enquanto o bug existia: cada copia contava
+// como estreia, entao todo pacote acendia. Num mundo com tipos ja
+// descobertos, um jogador novo pode abrir varios pacotes sem estrear nada -
+// e isso e o certo.
+//
+// O que da para cobrar sempre: nada marcado como estreia pode ser de um tipo
+// que ja tinha saido antes.
+{
+  const marcadas = r.cartas.filter((x) => x.estreia_mundial === true)
+  let mentiu = 0
+  for (const x of marcadas) {
+    const { count } = await admin.from('card_copies')
+      .select('id', { count: 'exact', head: true })
+      .eq('card_type_id', x.card_type_id)
+      .not('first_discovered_at', 'is', null)
+      .neq('id', x.copy_id)
+    if ((count ?? 0) > 0) mentiu++
+  }
+  checar('nenhuma estreia mundial falsa (tipo que ja tinha saido)', mentiu === 0,
+    `${marcadas.length} marcadas, ${mentiu} falsas`)
+}
 
 const { data: me1 } = await c.rpc('me')
 checar('consumiu um pacote comum', me1.packs_common === 11, `${me1.packs_common}`)

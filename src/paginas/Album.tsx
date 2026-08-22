@@ -198,16 +198,63 @@ export default function Album() {
   }
 
   // ------------------------------------------------------------- arraste
+  //
+  // A tela ACOMPANHA o dedo. No celular o deck fica no rodape e os slots de
+  // cima do album ficam fora da tela: sem isto era impossivel colar neles,
+  // porque para rolar a pagina era preciso soltar a figurinha.
+  //
+  // O alvo e recalculado a cada quadro, nao a cada pointermove: durante a
+  // rolagem automatica o dedo fica parado e o slot embaixo dele muda mesmo
+  // assim.
   useEffect(() => {
     if (!arrastando) return
-    const mover = (e: PointerEvent) => {
-      setPonteiro({ x: e.clientX, y: e.clientY })
-      const el = document.elementFromPoint(e.clientX, e.clientY)
+
+    const BORDA = 110      // faixa sensivel no topo e no rodape, em px
+    const MAX = 22         // px por quadro no limite da faixa
+    let vel = 0
+    let quadro = 0
+    const pos = { x: -1, y: -1 }
+
+    const mirar = () => {
+      if (pos.x < 0) return
+      const el = document.elementFromPoint(pos.x, pos.y)
       const slot = el?.closest('[data-slot]')
       const id = slot ? Number((slot as HTMLElement).dataset.slot) : null
       setSlotAlvo(id === (arrastando as any).card_type_id ? id : null)
     }
+
+    const passo = () => {
+      if (vel !== 0) {
+        const antes = window.scrollY
+        window.scrollBy(0, vel)
+        // so vale reMirar se a tela realmente andou; no fim do documento
+        // scrollBy nao faz nada e o alvo continua o mesmo
+        if (window.scrollY !== antes) mirar()
+      }
+      quadro = requestAnimationFrame(passo)
+    }
+    quadro = requestAnimationFrame(passo)
+
+    const mover = (e: PointerEvent) => {
+      pos.x = e.clientX; pos.y = e.clientY
+      setPonteiro({ x: e.clientX, y: e.clientY })
+
+      const alturaTela = window.innerHeight
+      if (e.clientY < BORDA) {
+        // quanto mais perto da borda, mais rapido. Linear e previsivel:
+        // com curva, o dedo passa de "parado" a "disparado" sem meio-termo.
+        vel = -Math.ceil(((BORDA - e.clientY) / BORDA) * MAX)
+      } else if (e.clientY > alturaTela - BORDA) {
+        vel = Math.ceil(((e.clientY - (alturaTela - BORDA)) / BORDA) * MAX)
+      } else {
+        vel = 0
+      }
+
+      mirar()
+    }
+
     const soltar = async () => {
+      cancelAnimationFrame(quadro)
       const alvo = slotAlvo
       const carta = arrastando
       setArrastando(null); setSlotAlvo(null)
@@ -219,10 +266,12 @@ export default function Album() {
       if (!error) setColadas((m) => new Map(m).set(alvo, carta.copy_id))
       setTimeout(() => setColandoAgora(null), 700)
     }
+
     window.addEventListener('pointermove', mover)
     window.addEventListener('pointerup', soltar)
     window.addEventListener('pointercancel', soltar)
     return () => {
+      cancelAnimationFrame(quadro)
       window.removeEventListener('pointermove', mover)
       window.removeEventListener('pointerup', soltar)
       window.removeEventListener('pointercancel', soltar)
@@ -418,6 +467,16 @@ export default function Album() {
           </>
         )
       })()}
+
+      {/* Faixas de rolagem. Sem elas ninguem descobre que arrastar ate a
+          borda faz a tela andar — e no celular essa e a unica forma de
+          alcancar os slots de cima. */}
+      {arrastando && (
+        <>
+          <div className="faixa-rolagem faixa-rolagem-topo"><span>▲</span></div>
+          <div className="faixa-rolagem faixa-rolagem-base"><span>▼</span></div>
+        </>
+      )}
 
       {/* fantasma seguindo o dedo */}
       {arrastando && (

@@ -170,25 +170,40 @@ for (const { nick } of clientes) {
   await chefe.c.rpc('admin_reset_player_collection', { p_nickname: nick })
 }
 await admin.from('players').update({ is_admin: false }).eq('id', chefe.id)
-for (const { id, c } of clientes) {
-  await c.auth.signOut()
-  await admin.from('players').delete().eq('id', id)
-  await admin.auth.admin.deleteUser(id)
-}
-// LIMPEZA: escopo restrito aos usuarios de teste.
+
+// LIMPEZA: escopo restrito aos usuarios de teste, e nesta ORDEM.
 //
-// A versao anterior fazia delete().neq('id', 0) em copy_history,
-// pack_openings e admin_log - ou seja, GLOBAL. Isso apaga o historico de
-// jogadores de verdade. Script de teste nao pode encostar em dado real.
+// Historico ANTES do jogador. copy_history, pack_openings e admin_log
+// referenciam players; apagar o jogador primeiro faz o delete falhar por FK.
+// A versao anterior fazia isso e ignorava o erro - a linha do jogador so
+// sumia de tabela por causa do cascade de auth.users, e quando o deleteUser
+// tambem falhava sobrava um `teste0` orfao no jogo de verdade.
+//
+// (A versao ANTES dessa fazia delete().neq('id', 0) - global. Isso apagou o
+// historico de jogador real uma vez. Escopo por id, sempre.)
+const erroLimpeza = []
+const anota = (onde, { error }) => { if (error) erroLimpeza.push(`${onde}: ${error.message}`) }
+
 for (const { id } of clientes) {
   const { data: ab } = await admin.from('pack_openings').select('id').eq('player_id', id)
   const ids = (ab ?? []).map((a) => a.id)
-  if (ids.length) await admin.from('pack_opening_cards').delete().in('opening_id', ids)
-  await admin.from('pack_openings').delete().eq('player_id', id)
-  await admin.from('copy_history').delete().eq('to_player', id)
-  await admin.from('copy_history').delete().eq('from_player', id)
-  await admin.from('admin_log').delete().eq('admin_id', id)
+  if (ids.length) anota('pack_opening_cards',
+    await admin.from('pack_opening_cards').delete().in('opening_id', ids))
+  anota('pack_openings', await admin.from('pack_openings').delete().eq('player_id', id))
+  anota('copy_history/to', await admin.from('copy_history').delete().eq('to_player', id))
+  anota('copy_history/from', await admin.from('copy_history').delete().eq('from_player', id))
+  anota('baba_log', await admin.from('baba_log').delete().eq('player_id', id))
+  anota('album_colagem', await admin.from('album_colagem').delete().eq('player_id', id))
+  anota('admin_log', await admin.from('admin_log').delete().eq('admin_id', id))
 }
+
+for (const { id, c } of clientes) {
+  await c.auth.signOut()
+  anota('players', await admin.from('players').delete().eq('id', id))
+  const { error } = await admin.auth.admin.deleteUser(id)
+  if (error) erroLimpeza.push(`deleteUser: ${error.message}`)
+}
+checar('a limpeza nao engoliu nenhum erro', erroLimpeza.length === 0, erroLimpeza.join(' | '))
 
 const sobrou = await admin.from('card_copies').select('id', { count: 'exact', head: true }).not('owner_id', 'is', null)
 checar('o acervo dos jogadores REAIS ficou intacto', sobrou.count === antes.count,
@@ -200,6 +215,11 @@ const fantasmas = await admin.from('card_copies')
   .not('first_discovered_at', 'is', null).is('first_discovered_by', null)
 checar('nenhuma estreia fantasma ficou para tras', fantasmas.count === 0,
   `${fantasmas.count} copias descobertas por ninguem`)
+// nenhum jogador de teste pode sobrar no jogo de verdade
+const { data: sobrando } = await admin.from('players')
+  .select('nickname').in('nickname', clientes.map((c) => c.nick))
+checar('nenhum jogador de teste sobrou', (sobrando ?? []).length === 0,
+  (sobrando ?? []).map((p) => p.nickname).join(', ') || 'nenhum')
 
 console.log(`\n${falhas === 0 ? 'TUDO PASSOU' : falhas + ' FALHA(S)'}`)
 process.exit(falhas === 0 ? 0 : 1)
