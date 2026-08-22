@@ -33,7 +33,11 @@ export function CartaAberta({
   const [giroLiberado, setGiroLiberado] = useState(!giroscopioPrecisaDePermissao())
   const { jogador, recarregar } = useSessao()
   const [quantas, setQuantas] = useState(0)      // quantas você tem deste tipo
-  const [souDono, setSouDono] = useState(false)  // ESTA cópia é minha?
+  // ESTA cópia é minha? `null` = ainda não se sabe. Tri-estado de propósito:
+  // com `false` inicial os botões apareciam por um instante na carta dos
+  // outros, e sumiam depois — pior do que nunca aparecer.
+  const [souDono, setSouDono] = useState<boolean | null>(null)
+  const [donoNick, setDonoNick] = useState<string | null>(null)
   const [confirmando, setConfirmando] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
   const [vendendo, setVendendo] = useState(false)
@@ -90,7 +94,8 @@ export function CartaAberta({
 
   // quantas cópias deste tipo você tem: a última nunca se vende (spec §19.4)
   useEffect(() => {
-    setConfirmando(false); setAviso(null); setSouDono(false); setQuantas(0)
+    setConfirmando(false); setAviso(null); setSouDono(null)
+    setQuantas(0); setDonoNick(null)
     if (!jogador) return
     ;(async () => {
       // A posse é DESTA cópia, não do tipo. Antes eu contava quantas do mesmo
@@ -100,7 +105,14 @@ export function CartaAberta({
         .select('owner_id').eq('id', carta.copy_id).single()
       const meu = dona?.owner_id === jogador.id
       setSouDono(meu)
-      if (!meu) return
+      if (!meu) {
+        if (dona?.owner_id) {
+          const { data: p } = await supabase.from('players_public')
+            .select('nickname').eq('id', dona.owner_id).single()
+          setDonoNick(p?.nickname ?? null)
+        }
+        return
+      }
 
       const { count } = await supabase.from('card_copies')
         .select('id', { count: 'exact', head: true })
@@ -135,7 +147,7 @@ export function CartaAberta({
     const mult = precos.get(`restauro_mult_${carta.damage_level}`)
     return base != null && mult != null ? Math.floor(base * mult) : null
   })()
-  const minha = souDono
+  const minha = souDono === true
   const podeVender = minha && quantas > 1 && carta.seal === 'none' && carta.tier !== 'prisma'
 
   async function restaurar() {
@@ -204,17 +216,34 @@ export function CartaAberta({
             </button>
           </div>
 
-          {/* Export para WhatsApp (spec §14) */}
-          <button
-            onClick={() => jogador && baixarFigurinha(carta, jogador.nickname)}
-            className="btn btn-fraco mt-2 w-full"
-          >
-            baixar figurinha
-          </button>
-          <p className="mt-1 text-[11px] leading-snug text-neutral-600">
-            O arquivo é comum e pode ser reenviado por qualquer um. Quem garante a posse é o app.
-            O código <span className="font-mono">{carta.verify_code}</span> abre a página do dono atual.
-          </p>
+          {/* Export para WhatsApp (spec §14).
+              Só do dono: baixar a figurinha de outro jogador é exportar
+              posse que não é sua. Na caçada de serial e nas vitrines a
+              carta é para olhar, e mais nada. */}
+          {minha && (
+            <>
+              <button
+                onClick={() => jogador && baixarFigurinha(carta, jogador.nickname)}
+                className="btn btn-fraco mt-2 w-full"
+              >
+                baixar figurinha
+              </button>
+              <p className="mt-1 text-[11px] leading-snug text-neutral-600">
+                O arquivo é comum e pode ser reenviado por qualquer um. Quem garante a posse é o app.
+                O código <span className="font-mono">{carta.verify_code}</span> abre a página do dono atual.
+              </p>
+            </>
+          )}
+
+          {souDono === false && (
+            <p className="mt-2 rounded-lg border border-neutral-800 bg-neutral-900/60 p-2
+                          text-[11px] leading-snug text-neutral-500">
+              Esta cópia {donoNick ? <>é de <strong className="text-neutral-300">{donoNick}</strong></>
+                                   : 'não é sua'} — só dá para olhar.
+              O código <span className="font-mono">{carta.verify_code}</span> abre a página
+              do dono atual.
+            </p>
+          )}
 
           {/* ---------------------------------------------------------- vender */}
           {minha && (
