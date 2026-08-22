@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useSessao } from '../lib/sessao'
 import { Figurinha } from '../componentes/Figurinha'
+import { CartaAberta } from '../componentes/CartaAberta'
 import { ROTULO_TIER, COR_TIER, type Carta, type Tier } from '../lib/tipos'
 import '../styles/menu.css'
 
@@ -15,15 +18,16 @@ import '../styles/menu.css'
 
 type Tipo = {
   skin: string; tier: Tier; tier_order: number; print_run: number
-  distribuidas: number; descoberto: boolean; primeiro: string | null; em: string | null
+  distribuidas: number; em_maos: number
+  descoberto: boolean; primeiro: string | null; em: string | null
 }
 type Personagem = { slug: string; nome: string; descoberto: boolean; tipos: Tipo[] }
 type Indice = { personagens: Personagem[]; descobertos: number; total_personagens: number }
 type Par = { nickname: string; personagem: string; nome: string; em: string }
 type Rank = {
   nickname: string; copias: number; selos: number
-  melhor_serial: number; melhor_skin: string; melhor_personagem: string
-  melhor_print_run: number; unos: number
+  melhor_serial: number; unos: number
+  destaques: Carta[]
 }
 
 /**
@@ -56,7 +60,9 @@ function Selo({ personagem, skin, tier, descoberto, titulo }: {
 }
 
 export default function Conquistas() {
+  const { jogador } = useSessao()
   const [indice, setIndice] = useState<Indice | null>(null)
+  const [emFoco, setEmFoco] = useState<{ lista: Carta[]; i: number } | null>(null)
   const [pares, setPares] = useState<Par[]>([])
   const [rank, setRank] = useState<Rank[]>([])
   const [vitrines, setVitrines] = useState<{ nickname: string; cartas: Carta[] }[]>([])
@@ -138,12 +144,13 @@ export default function Conquistas() {
               </button>
 
               {/* a fileira de figurinhas do personagem, sempre visível */}
-              <div className="grid grid-cols-7 gap-1.5 border-t border-neutral-900 px-3 py-3
-                              sm:grid-cols-14 sm:gap-2 lg:grid-cols-[repeat(27,minmax(0,1fr))]">
+              <div className="grid grid-cols-9 gap-1 border-t border-neutral-900 px-2 py-2
+                              sm:grid-cols-14 sm:gap-2 sm:px-3 sm:py-3
+                              lg:grid-cols-[repeat(27,minmax(0,1fr))]">
                 {p.tipos.map((t) => (
                   <Selo key={t.skin} personagem={p.slug} skin={t.skin} tier={t.tier}
                         descoberto={t.descoberto}
-                        titulo={`${t.skin} · ${ROTULO_TIER[t.tier]} · ${t.distribuidas}/${t.print_run} distribuídas`} />
+                        titulo={`${t.skin} · ${ROTULO_TIER[t.tier]} · ${t.distribuidas}/${t.print_run} já saíram, ${t.em_maos} em mãos`} />
                 ))}
               </div>
 
@@ -151,7 +158,7 @@ export default function Conquistas() {
               <div className={`indice-corpo ${aberto === p.slug ? 'aberto' : ''}`}>
                 <div>
                   <div className="indice-linha indice-cabec">
-                    <span>skin</span><span>tier</span><span>distribuídas</span>
+                    <span>skin</span><span>tier</span><span>já saíram · em mãos</span>
                     <span className="text-right">estreia mundial</span>
                   </div>
                   {p.tipos.map((t) => {
@@ -167,6 +174,7 @@ export default function Conquistas() {
                         <span className="flex items-center gap-2">
                           <span className="tabular-nums text-neutral-400">
                             {t.distribuidas}/{t.print_run}
+                            <span className="text-neutral-600"> · {t.em_maos} em mãos</span>
                           </span>
                           <span className="barra flex-1">
                             <i style={{
@@ -215,52 +223,81 @@ export default function Conquistas() {
       <section>
         <h2 className="text-lg font-semibold tracking-tight">Caçada de serial</h2>
         <p className="mb-2 text-xs text-neutral-500">Menores seriais e selos, por jogador.</p>
-        <table className="w-full text-left text-sm">
-          <thead className="text-neutral-500">
-            <tr className="border-b border-neutral-800">
-              <th className="w-1/4 py-1 font-normal">jogador</th>
-              <th className="text-right font-normal">selos</th>
-              <th className="text-right font-normal">nº 1</th>
-              <th className="text-right font-normal">melhor serial</th>
-              <th className="text-right font-normal">cópias</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rank.map((r) => (
-              <tr key={r.nickname} className="border-b border-neutral-900">
-                <td className="py-1">{r.nickname}</td>
-                <td className="text-right tabular-nums">{r.selos}</td>
-                <td className="text-right tabular-nums text-neutral-400">{r.unos}</td>
-                <td className="text-right tabular-nums">
-                  {r.melhor_serial}/{r.melhor_print_run}
-                  <span className="text-neutral-600"> · {r.melhor_personagem} {r.melhor_skin}</span>
-                </td>
-                <td className="text-right tabular-nums text-neutral-400">{r.copias}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="space-y-2">
+          {rank.map((r) => (
+            <div key={r.nickname} className="rounded border border-neutral-800">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm">
+                <span className="font-medium">{r.nickname}</span>
+                <span className="chip"><strong>{r.selos}</strong> selos</span>
+                <span className="chip"><strong>{r.unos}</strong> nº 1</span>
+                <span className="chip">melhor serial <strong>{r.melhor_serial}</strong></span>
+                <span className="ml-auto text-neutral-500">{r.copias} cópias</span>
+              </div>
+              {r.destaques?.length > 0 && (
+                <div className="grid grid-cols-6 gap-1.5 border-t border-neutral-900 px-3 py-3
+                                sm:gap-2 lg:grid-cols-[repeat(12,minmax(0,1fr))]">
+                  {r.destaques.map((c, i) => (
+                    <button key={c.copy_id} onClick={() => setEmFoco({ lista: r.destaques, i })}
+                      title={`${c.character_name} · ${c.skin}`}>
+                      <Figurinha carta={c} tamanho="miniatura" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+          {rank.length === 0 && <p className="text-sm text-neutral-600">ninguém tem figurinha ainda</p>}
+        </div>
       </section>
 
       {/* ------------------------------------------------------ vitrines */}
       <section>
         <h2 className="text-lg font-semibold tracking-tight">Vitrines</h2>
-        <p className="mb-2 text-xs text-neutral-500">Três figurinhas que cada um escolheu mostrar.</p>
+        <p className="mb-2 text-xs text-neutral-500">
+          Três figurinhas que cada um escolheu mostrar.{' '}
+          <Link to="/perfil" className="underline underline-offset-2 hover:text-neutral-300">
+            montar a sua no Perfil
+          </Link>
+        </p>
         {vitrines.length === 0 ? (
-          <p className="text-sm text-neutral-600">ninguém montou vitrine ainda</p>
+          <Link to="/perfil"
+            className="painel block p-6 text-center text-sm text-neutral-500 hover:text-neutral-300">
+            Ninguém montou vitrine ainda. <strong className="text-[var(--acento)]">Seja o primeiro</strong> —
+            escolha 3 figurinhas no Perfil.
+          </Link>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
             {vitrines.map((v) => (
               <div key={v.nickname} className="rounded border border-neutral-800 p-3">
-                <p className="mb-2 text-sm font-medium">{v.nickname}</p>
+                <p className="mb-2 flex items-center justify-between text-sm font-medium">
+                  {v.nickname}
+                  {v.nickname === jogador?.nickname && (
+                    <Link to="/perfil" className="text-xs font-normal text-neutral-500 underline">
+                      editar
+                    </Link>
+                  )}
+                </p>
                 <div className="grid grid-cols-3 gap-2">
-                  {v.cartas.map((c) => <Figurinha key={c.copy_id} carta={c} tamanho="miniatura" />)}
+                  {v.cartas.map((c, i) => (
+                    <button key={c.copy_id} onClick={() => setEmFoco({ lista: v.cartas, i })}>
+                      <Figurinha carta={c} tamanho="miniatura" />
+                    </button>
+                  ))}
                 </div>
               </div>
             ))}
           </div>
         )}
       </section>
+
+      {emFoco && (
+        <CartaAberta
+          lista={emFoco.lista}
+          indice={emFoco.i}
+          aoFechar={() => setEmFoco(null)}
+          aoNavegar={(i) => setEmFoco({ ...emFoco, i })}
+        />
+      )}
     </div>
   )
 }

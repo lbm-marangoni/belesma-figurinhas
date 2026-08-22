@@ -10,12 +10,12 @@ import { useSessao } from '../lib/sessao'
  * nada: toda chamada abaixo volta "nao autorizado" para quem não é is_admin.
  */
 
-const ABAS = ['Jogadores', 'Odds', 'Estoque', 'Conteúdo', 'Zona de perigo', 'Log'] as const
+const ABAS = ['Saúde', 'Jogadores', 'Odds', 'Estoque', 'Sorteio', 'Conteúdo', 'Zona de perigo', 'Log'] as const
 type Aba = (typeof ABAS)[number]
 
 export default function Admin() {
   const { jogador, carregando } = useSessao()
-  const [aba, setAba] = useState<Aba>('Jogadores')
+  const [aba, setAba] = useState<Aba>('Saúde')
 
   if (carregando) return <p className="p-6 text-neutral-500">…</p>
   // Spec §18: para quem não é admin, 404. Não "acesso negado" — nada de
@@ -32,7 +32,7 @@ export default function Admin() {
   }
 
   return (
-    <div className="p-4 sm:p-6">
+    <div className="mx-auto max-w-[112rem] p-3 sm:p-6">
       <nav className="mb-5 flex flex-wrap gap-1 border-b border-neutral-800">
         {ABAS.map((a) => (
           <button key={a} onClick={() => setAba(a)}
@@ -43,7 +43,9 @@ export default function Admin() {
           </button>
         ))}
       </nav>
+      {aba === 'Saúde' && <Saude />}
       {aba === 'Jogadores' && <Jogadores />}
+      {aba === 'Sorteio' && <Sorteio />}
       {aba === 'Odds' && <Odds />}
       {aba === 'Estoque' && <Estoque />}
       {aba === 'Conteúdo' && <Conteudo />}
@@ -79,6 +81,109 @@ const campo = 'rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-s
 const botao = 'rounded bg-neutral-100 px-3 py-1 text-sm font-medium text-neutral-900 disabled:opacity-40'
 const perigoso = 'rounded bg-red-700 px-3 py-1 text-sm font-medium text-white disabled:opacity-40'
 
+// ================================================================ Saúde
+function Saude() {
+  const [s, setS] = useState<any>(null)
+  useEffect(() => { supabase.rpc('admin_saude').then(({ data }) => setS(data)) }, [])
+  if (!s) return <p className="text-neutral-500">…</p>
+
+  const alertas = Object.entries(s.alertas as Record<string, number>)
+  const ruins = alertas.filter(([, v]) => Number(v) > 0)
+
+  return (
+    <div className="space-y-6 text-sm">
+      {/* Invariantes primeiro: se alguma quebrou, é a única coisa que importa
+          nesta tela. Configuração pode estar errada; invariante quebrada é bug. */}
+      <section className={`rounded-lg p-3 ${ruins.length ? 'aviso-ruim' : 'aviso-ok'}`}>
+        <p className="font-medium">
+          {ruins.length === 0
+            ? 'Todas as invariantes de pé.'
+            : `${ruins.length} invariante(s) quebrada(s) — isto é bug, não configuração.`}
+        </p>
+        <ul className="mt-1 text-xs">
+          {alertas.map(([k, v]) => (
+            <li key={k} className={Number(v) > 0 ? 'font-semibold' : 'opacity-60'}>
+              {Number(v) > 0 ? '✗' : '✓'} {k.replace(/_/g, ' ')}{Number(v) > 0 ? ` (${v})` : ''}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          ['jogadores', s.jogadores], ['cópias com dono', s.copias_com_dono],
+          ['queimadas', s.queimadas], ['forjadas', s.forjadas],
+          ['reserva do diário', s.reserva_diaria], ['pool base livre', s.pool_base_livre],
+          ['baba em circulação', s.baba_em_circulacao], ['trocas pendentes', s.trocas_pendentes],
+        ].map(([k, v]) => (
+          <div key={String(k)} className="painel p-3">
+            <p className="text-xs uppercase tracking-wider text-neutral-500">{k}</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">{String(v)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ================================================================ Sorteio
+function Sorteio() {
+  const [a, setA] = useState<any>(null)
+  useEffect(() => { supabase.rpc('admin_auditoria_sorteio').then(({ data }) => setA(data)) }, [])
+  if (!a) return <p className="text-neutral-500">…</p>
+
+  return (
+    <div className="space-y-5 text-sm">
+      <p className="text-neutral-400">
+        {a.aberturas} aberturas · {a.cartas} cartas · quente {a.variancia.quente} ·
+        bônus {a.variancia.bonus} · pity {a.variancia.pity} ·
+        promovidos {a.variancia.promovidos}
+      </p>
+
+      <p className={`rounded-lg p-2 text-sm ${
+        a.diamante_prisma_em_slot_garantido === 0 ? 'aviso-ok' : 'aviso-ruim'}`}>
+        Regra dura da §8: diamante e prisma em slot garantido ={' '}
+        <strong>{a.diamante_prisma_em_slot_garantido}</strong>
+        {a.diamante_prisma_em_slot_garantido === 0 ? ' — como tem que ser.' : ' — isto é bug.'}
+      </p>
+
+      <div>
+        <h3 className="mb-1 font-medium">Slot de hit: observado vs tabela</h3>
+        <p className="mb-2 text-xs text-neutral-500">
+          Só slots de hit naturais — promoção, pacote quente e pity ficam de fora, senão
+          poluiriam a amostra. Com poucas aberturas a variância é grande; olhe a tendência.
+        </p>
+        <table className="w-full max-w-2xl text-left">
+          <thead className="text-xs text-neutral-500">
+            <tr className="border-b border-neutral-800">
+              <th className="py-1 font-normal">pacote</th><th className="font-normal">tier</th>
+              <th className="text-right font-normal">saiu</th>
+              <th className="text-right font-normal">observado</th>
+              <th className="text-right font-normal">tabela</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(a.hit_por_tier ?? []).map((r: any, i: number) => {
+              const desvio = r.esperado_pct ? Math.abs(r.observado_pct - r.esperado_pct) : 0
+              return (
+                <tr key={i} className="border-b border-neutral-900">
+                  <td className="py-1">{r.pack_type}</td>
+                  <td>{r.tier}</td>
+                  <td className="text-right tabular-nums">{r.saiu}</td>
+                  <td className={`text-right tabular-nums ${desvio > 15 ? 'text-amber-400' : ''}`}>
+                    {r.observado_pct}%
+                  </td>
+                  <td className="text-right tabular-nums text-neutral-500">{r.esperado_pct ?? '—'}%</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 // ================================================================ Jogadores
 function Jogadores() {
   const [lista, setLista] = useState<any[]>([])
@@ -88,6 +193,10 @@ function Jogadores() {
   const [qtd, setQtd] = useState(10)
   const [senhaAlvo, setSenhaAlvo] = useState('')
   const [senhaNova, setSenhaNova] = useState('')
+  const [babaAlvo, setBabaAlvo] = useState('todos')
+  const [babaDelta, setBabaDelta] = useState(100)
+  const [babaMotivo, setBabaMotivo] = useState('')
+  const [detalhe, setDetalhe] = useState<{ nick: string; extrato: any; acervo: any } | null>(null)
 
   const carregar = async () => {
     const { data } = await supabase.rpc('admin_jogadores')
@@ -112,7 +221,19 @@ function Jogadores() {
         <tbody>
           {lista.map((p) => (
             <tr key={p.id} className="border-b border-neutral-900">
-              <td className="py-1">{p.nickname} {p.is_admin && <span className="text-amber-400">admin</span>}</td>
+              <td className="py-1">
+                <button className="underline underline-offset-2 hover:text-white"
+                  onClick={async () => {
+                    const [e, ac] = await Promise.all([
+                      supabase.rpc('admin_extrato', { p_nickname: p.nickname }),
+                      supabase.rpc('admin_acervo', { p_nickname: p.nickname }),
+                    ])
+                    setDetalhe({ nick: p.nickname, extrato: e.data, acervo: ac.data })
+                  }}>
+                  {p.nickname}
+                </button>
+                {p.is_admin && <span className="ml-1 text-amber-400">admin</span>}
+              </td>
               <td className="text-neutral-500">{new Date(p.created_at).toLocaleDateString('pt-BR')}</td>
               <td className="text-right tabular-nums">{p.copias}</td>
               <td className="text-right tabular-nums text-neutral-400">
@@ -144,6 +265,81 @@ function Jogadores() {
           }}>dar</button>
         </div>
       </section>
+
+      <section>
+        <h3 className="mb-2 text-sm font-medium">Dar ou tirar baba</h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={babaAlvo} onChange={(e) => setBabaAlvo(e.target.value)} className={campo}>
+            <option value="todos">todos</option>
+            {lista.map((p) => <option key={p.id} value={p.nickname}>{p.nickname}</option>)}
+          </select>
+          <input type="number" value={babaDelta} onChange={(e) => setBabaDelta(+e.target.value)}
+            className={`${campo} w-24`} />
+          <input placeholder="motivo (vai para o extrato)" value={babaMotivo}
+            onChange={(e) => setBabaMotivo(e.target.value)} className={`${campo} w-64`} />
+          <button className={botao} disabled={!babaMotivo.trim() || babaDelta === 0}
+            onClick={async () => {
+              if (await rodar(() => supabase.rpc('admin_dar_baba', {
+                p_target: babaAlvo, p_delta: babaDelta, p_motivo: babaMotivo,
+              }), (n) => `${babaDelta > 0 ? '+' : ''}${babaDelta} baba para ${n} jogador(es)`)) {
+                setBabaMotivo(''); carregar()
+              }
+            }}>aplicar</button>
+        </div>
+        <p className="mt-1 text-xs text-neutral-600">
+          Sempre aparece no extrato do jogador, com o motivo. Débito maior que o saldo corta no zero.
+        </p>
+      </section>
+
+      {detalhe && (
+        <section className="painel p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-medium">
+              {detalhe.nick} · saldo {detalhe.extrato?.saldo} baba · {detalhe.acervo?.length ?? 0} cópias
+            </h3>
+            <button className="btn btn-fraco" onClick={() => setDetalhe(null)}>fechar</button>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div>
+              <p className="mb-1 text-xs uppercase tracking-wider text-neutral-500">extrato</p>
+              <div className="max-h-64 overflow-y-auto text-xs">
+                {(detalhe.extrato?.lancamentos ?? []).map((l: any, i: number) => (
+                  <div key={i} className="flex justify-between border-b border-neutral-900 py-0.5">
+                    <span className="text-neutral-400">{l.motivo}</span>
+                    <span className={l.delta > 0 ? 'text-[var(--acento)]' : 'text-red-400'}>
+                      {l.delta > 0 ? '+' : ''}{l.delta}
+                    </span>
+                  </div>
+                ))}
+                {(detalhe.extrato?.lancamentos ?? []).length === 0 && (
+                  <p className="text-neutral-600">sem movimentação</p>)}
+              </div>
+            </div>
+            <div>
+              <p className="mb-1 text-xs uppercase tracking-wider text-neutral-500">acervo</p>
+              <div className="max-h-64 overflow-y-auto text-xs">
+                {(detalhe.acervo ?? []).map((c: any, i: number) => (
+                  <div key={i} className="flex justify-between border-b border-neutral-900 py-0.5">
+                    <span>{c.personagem} {c.skin}</span>
+                    <span className="font-mono text-neutral-500">
+                      {c.origin === 'forge' ? `FORJADA ${c.forge_index}` : `${c.serial}/${c.print_run}`}
+                      {c.seal !== 'none' && ` · ${c.seal}`}
+                      {c.damage_level > 0 && ` · nv${c.damage_level}`}
+                    </span>
+                  </div>
+                ))}
+                {(detalhe.acervo ?? []).length === 0 && (
+                  <p className="text-neutral-600">sem figurinhas</p>)}
+              </div>
+            </div>
+          </div>
+          <button className="btn btn-fraco mt-3"
+            onClick={() => rodar(() => supabase.rpc('admin_descolar_album', { p_nickname: detalhe.nick }),
+              (n) => `${n} figurinhas descoladas do álbum de ${detalhe.nick}`)}>
+            descolar o álbum inteiro
+          </button>
+        </section>
+      )}
 
       <section>
         <h3 className="mb-2 text-sm font-medium">Resetar senha</h3>

@@ -58,7 +58,7 @@ export default function Album() {
   // selo e desgaste mudam, entao a escolha e do jogador.
   const [escolhida, setEscolhida] = useState<Map<number, number>>(new Map())
   const [escolhendo, setEscolhendo] = useState<{ tipo: number; x: number; y: number } | null>(null)
-  const gesto = useRef<{ x: number; y: number; carta: Carta; tipo: number } | null>(null)
+
 
   const carregar = useCallback(async () => {
     if (!jogador) return
@@ -124,32 +124,34 @@ export default function Album() {
     de: tipos.length,
   }), [coladasValidas, minhas, tipos])
 
-  // Toque seco abre o seletor de repetida; arrastar comeca depois de 5px.
-  // Sem essa distincao nao daria para ter os dois gestos no mesmo alvo.
-  useEffect(() => {
-    const g = gesto.current
-    if (!g || arrastando) return
-    const mover = (e: PointerEvent) => {
-      if (Math.hypot(e.clientX - g.x, e.clientY - g.y) < 5) return
-      setPonteiro({ x: e.clientX, y: e.clientY })
-      setArrastando(g.carta)
-      gesto.current = null
+  /**
+   * Toque seco abre o seletor de repetida; arrastar começa depois de 5px.
+   *
+   * Os listeners são presos AQUI, no próprio pointerdown, e não num efeito.
+   * A versão anterior lia `gesto.current` dentro de um `useEffect` — só que
+   * mexer num ref não re-renderiza, então o efeito nunca rodava depois do
+   * pointerdown e nada arrastava.
+   */
+  function iniciarGesto(e: React.PointerEvent, carta: Carta, tipo: number) {
+    e.preventDefault()
+    const x0 = e.clientX, y0 = e.clientY
+    let virouArraste = false
+
+    const mover = (ev: PointerEvent) => {
+      if (!virouArraste && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return
+      if (!virouArraste) { virouArraste = true; setArrastando(carta) }
+      setPonteiro({ x: ev.clientX, y: ev.clientY })
     }
-    const soltar = (e: PointerEvent) => {
-      if (gesto.current) {
-        setEscolhendo({ tipo: g.tipo, x: e.clientX, y: e.clientY })
-        gesto.current = null
-      }
-      limpar()
-    }
-    const limpar = () => {
+    const soltar = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', mover)
       window.removeEventListener('pointerup', soltar)
+      window.removeEventListener('pointercancel', soltar)
+      if (!virouArraste) setEscolhendo({ tipo, x: ev.clientX, y: ev.clientY })
     }
     window.addEventListener('pointermove', mover)
     window.addEventListener('pointerup', soltar)
-    return limpar
-  })
+    window.addEventListener('pointercancel', soltar)
+  }
 
   // ------------------------------------------------------------- arraste
   useEffect(() => {
@@ -292,10 +294,7 @@ export default function Album() {
                 <div
                   key={tid}
                   className={`deck-carta ${arrastando?.copy_id === alvo.copy_id ? 'arrastando' : ''}`}
-                  onPointerDown={(e) => {
-                    e.preventDefault()
-                    gesto.current = { x: e.clientX, y: e.clientY, carta: alvo, tipo: tid }
-                  }}
+                  onPointerDown={(e) => iniciarGesto(e, alvo, tid)}
                 >
                   {cs.length > 1 && <span className="deck-badge">{cs.length}</span>}
                   <Figurinha carta={alvo} tamanho="miniatura" />

@@ -156,7 +156,7 @@ export default function Trocas() {
   }
 
   return (
-    <div className="p-4 sm:p-6">
+    <div className="mx-auto max-w-[100rem] p-3 sm:p-6">
       {msg && (
         <p className={`mb-4 rounded border p-2 text-sm ${msg.tipo === 'ok'
           ? 'border-emerald-900 bg-emerald-950/50 text-emerald-300'
@@ -240,7 +240,7 @@ function Seletor({ titulo, cartas, valor, aoEscolher }: {
   return (
     <div>
       <p className="mb-1 text-xs text-neutral-400">{titulo}</p>
-      <div className="grid max-h-64 grid-cols-3 gap-2 overflow-y-auto rounded border border-neutral-800 p-2 sm:grid-cols-4">
+      <div className="grid max-h-64 grid-cols-4 gap-2 overflow-y-auto rounded border border-neutral-800 p-2 sm:grid-cols-5 lg:grid-cols-6">
         {cartas.length === 0 && <p className="col-span-full py-6 text-center text-xs text-neutral-600">nenhuma carta</p>}
         {cartas.map((c) => (
           <button key={c.copy_id} onClick={() => aoEscolher(c.copy_id)} className="text-left">

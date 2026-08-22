@@ -71,7 +71,7 @@ export default function Abrir() {
   }
 
   return (
-    <div className="p-4 sm:p-6">
+    <div className="mx-auto max-w-[100rem] p-3 sm:p-6">
       {/* ------------------------------------------------------------ diário */}
       {!animando && (
         <div className="painel mb-4 flex flex-wrap items-center gap-3 p-3">

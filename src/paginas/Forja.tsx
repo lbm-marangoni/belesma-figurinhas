@@ -93,7 +93,7 @@ export default function Forja() {
   }
 
   return (
-    <div className="p-4 sm:p-6">
+    <div className="mx-auto max-w-[100rem] p-3 sm:p-6">
       <h2 className="text-lg font-semibold">Forja</h2>
       <p className="mb-4 max-w-2xl text-sm text-neutral-400">
         Cinco figurinhas do <strong className="text-neutral-200">mesmo tier</strong> — personagens e
@@ -146,7 +146,7 @@ export default function Forja() {
       </div>
 
       {tier && (
-        <div className="grid grid-cols-3 gap-3 sm:grid-cols-5 md:grid-cols-8">
+        <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 sm:gap-3 md:grid-cols-8 lg:grid-cols-10">
           {doTier.map((c) => (
             <button key={c.copy_id} onClick={() => alternar(c.copy_id)} className="text-left">
               <Figurinha carta={c} tamanho="miniatura" selecionada={escolhidas.includes(c.copy_id)} />

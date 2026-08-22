@@ -161,7 +161,7 @@ export default function Colecao() {
   const selo3 = ['branco', 'preto', 'rosa'] as const
 
   return (
-    <div className="p-4 sm:p-6">
+    <div className="mx-auto max-w-[112rem] p-3 sm:p-6">
       <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
         <Selecao valor={personagem} aoMudar={setPersonagem}
           opcoes={[['todos', 'Todos os Belesmas'], ...personagens.map((p) => [p, p] as [string, string])]} />
@@ -197,7 +197,7 @@ export default function Colecao() {
           Nada aqui ainda. Abra um pacote.
         </p>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-9">
           {pilhas.map(({ chave, copias }) => (
             <div key={chave} className="relative">
               <Figurinha

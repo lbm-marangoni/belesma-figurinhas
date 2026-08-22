@@ -36,6 +36,7 @@ export function CartaAberta({
   const [confirmando, setConfirmando] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
   const [vendendo, setVendendo] = useState(false)
+  const [precos, setPrecos] = useState<Map<string, number>>(new Map())
   const dialogo = useRef<HTMLDivElement>(null)
   const focoAnterior = useRef<HTMLElement | null>(null)
   const toqueX = useRef<number | null>(null)
@@ -97,9 +98,44 @@ export function CartaAberta({
       .then(({ count }) => setQuantas(count ?? 0))
   }, [carta.copy_id, jogador])
 
+  // os precos vivem em economy_config e o admin edita sem deploy (§19.7),
+  // entao o valor mostrado tem que vir de la, nunca de constante no código
+  useEffect(() => {
+    supabase.from('economy_config').select('chave, valor')
+      .then(({ data }) => setPrecos(new Map((data ?? []).map((p: any) => [p.chave, Number(p.valor)]))))
+  }, [])
+
   const cor = COR_TIER[carta.tier]
+
+  /** Mesma conta da RPC `vender`: base do tier, 40% se estragada, 40% se forjada. */
+  const valorVenda = (() => {
+    const base = precos.get(`venda_${carta.tier}`)
+    if (base == null) return null
+    let v = base
+    if (carta.damage_level > 0) v *= precos.get('multiplicador_estragada') ?? 0.4
+    if (carta.origin === 'forge') v *= precos.get('multiplicador_forjada') ?? 0.4
+    return Math.floor(v)
+  })()
+
+  const custoRestauro = (() => {
+    if (carta.damage_level === 0) return null
+    const base = precos.get(`venda_${carta.tier}`)
+    const mult = precos.get(`restauro_mult_${carta.damage_level}`)
+    return base != null && mult != null ? Math.floor(base * mult) : null
+  })()
   const minha = !!jogador && quantas > 0
   const podeVender = minha && quantas > 1 && carta.seal === 'none' && carta.tier !== 'prisma'
+
+  async function restaurar() {
+    setVendendo(true); setAviso(null)
+    const { data, error } = await supabase.rpc('restaurar', { p_copy_id: carta.copy_id })
+    setVendendo(false)
+    if (error) return setAviso(error.message)
+    await recarregar()
+    aoMudar?.()
+    setAviso(`Restaurada por ${(data as any).custo} baba.`)
+    setTimeout(aoFechar, 900)
+  }
 
   async function vender() {
     setVendendo(true); setAviso(null)
@@ -173,16 +209,26 @@ export function CartaAberta({
             <div className="mt-3">
               {!confirmando ? (
                 <button onClick={() => setConfirmando(true)} disabled={!podeVender}
-                  className="btn btn-fraco w-full">
-                  vender
+                  className="btn btn-fraco flex w-full items-center justify-between">
+                  <span>vender</span>
+                  {valorVenda != null && (
+                    <span className="text-[var(--acento)]">
+                      +{valorVenda} baba
+                      {(carta.damage_level > 0 || carta.origin === 'forge') && (
+                        <span className="text-neutral-600"> (40%)</span>
+                      )}
+                    </span>
+                  )}
                 </button>
               ) : (
                 <div className="painel border-amber-900 p-3 text-left">
                   <p className="text-xs leading-snug text-amber-300">
-                    Ela volta ao pool <strong>marcada com desgaste</strong> e outra pessoa pode
-                    puxá-la em pacote. {carta.origin === 'forge'
-                      ? 'Forjada vale 40% e é queimada de vez.'
-                      : 'Isto não se desfaz.'}
+                    Você recebe <strong>{valorVenda ?? '—'} baba</strong>.{' '}
+                    {carta.origin === 'forge'
+                      ? 'Forjada vale 40% do tier e é queimada de vez — não volta ao pool.'
+                      : <>Ela volta ao pool <strong>marcada com desgaste nível{' '}
+                          {Math.min(carta.damage_level + 1, 3)}</strong> e outra pessoa pode puxá-la
+                          em pacote. Isto não se desfaz.</>}
                   </p>
                   <div className="mt-2 flex gap-2">
                     <button onClick={vender} disabled={vendendo} className="btn btn-perigo flex-1">
@@ -202,6 +248,14 @@ export function CartaAberta({
                     : 'Sua única cópia deste tipo — não dá para vender.'}
                 </p>
               )}
+              {carta.damage_level > 0 && (
+                <button onClick={restaurar} disabled={vendendo || custoRestauro == null}
+                  className="btn btn-fraco mt-2 flex w-full items-center justify-between">
+                  <span>restaurar o desgaste</span>
+                  <span className="text-amber-400">−{custoRestauro ?? '—'} baba</span>
+                </button>
+              )}
+
               {aviso && <p className="mt-2 rounded-lg p-2 text-xs aviso-ok">{aviso}</p>}
             </div>
           )}

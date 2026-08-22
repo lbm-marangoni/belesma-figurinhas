@@ -173,3 +173,39 @@
   .leque { animation: none; }
   .indice-corpo { transition: none; }
 }
+
+@media (max-width: 640px) {
+  /* no celular o popover vira folha ancorada embaixo: ancorar na carta com
+     288px de largura numa tela de 360 não sobra margem para nada */
+  .leque {
+    left: 50% !important;
+    right: auto;
+    top: auto !important;
+    bottom: 0;
+    translate: -50% 0;
+    width: calc(100vw - 1rem);
+    max-width: none;
+    border-radius: 14px 14px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: leque-sobe 180ms cubic-bezier(.2,.9,.3,1.05);
+  }
+  .leque::before { display: none; }
+  .leque-lista { max-height: 40vh; }
+  .leque-linha { padding: .5rem .45rem; }
+  .leque-acao { width: 2.2rem; height: 2.2rem; }
+
+  /* a grade do índice não cabe em 4 colunas num celular */
+  .indice-linha {
+    grid-template-columns: 1fr auto;
+    gap: .15rem .5rem;
+    padding: .45rem .7rem;
+  }
+  .indice-linha > :nth-child(3) { grid-column: 1 / -1; }
+  .indice-linha > :nth-child(4) { grid-column: 1 / -1; text-align: left !important;
+                                  font-size: .68rem; }
+  .indice-cabec { display: none; }
+}
+@keyframes leque-sobe {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

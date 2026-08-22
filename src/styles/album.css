@@ -339,11 +339,21 @@
   filter: drop-shadow(0 12px 18px rgba(0,0,0,.7));
 }
 
-@media (max-width: 640px) {
-  .livro { grid-template-columns: 1fr; }
+@media (max-width: 768px) {
+  /* uma página por vez: duas colunas num celular dariam slots de 60px */
+  .livro { grid-template-columns: 1fr; box-shadow: 0 0 0 5px #0d0b09, 0 0 0 6px #2a231b; }
+  .livro > .pagina-dir { display: none; }
   .folha { display: none; }             /* no celular a virada é troca direta */
   .pagina-esq::after, .pagina-dir::after { display: none; }
-  .pagina { min-height: auto; }
+  .pagina { min-height: auto; padding: 1rem .9rem 1.6rem; border-radius: 4px; }
+  .grade-slots { gap: .7rem .7rem; }
+
+  /* o deck fica preso no rodapé e as cartas crescem para o polegar */
+  .deck { padding: .5rem .6rem calc(.6rem + env(safe-area-inset-bottom)); }
+  .deck-carta { flex-basis: 5.4rem; }
+  .deck-carta:hover { transform: none; }
+
+  .mesa { padding: 0 0 .5rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

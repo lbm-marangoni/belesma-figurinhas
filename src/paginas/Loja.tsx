@@ -74,7 +74,7 @@ export default function Loja() {
   const pacotes: [TipoPacote, string][] = [['comum', 'Comum'], ['raro', 'Raro'], ['ultra', 'Ultra']]
 
   return (
-    <div className="p-4 sm:p-6">
+    <div className="mx-auto max-w-[80rem] p-3 sm:p-6">
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h2 className="text-lg font-semibold">Loja</h2>
         <span className="chip"><strong>{jogador.baba}</strong> baba</span>
