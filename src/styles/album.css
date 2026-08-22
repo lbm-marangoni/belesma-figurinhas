@@ -223,6 +223,23 @@
   50%      { box-shadow: 0 0 0 3px var(--luz), 0 0 30px color-mix(in srgb, var(--luz) 75%, transparent); }
 }
 
+/* Slot ja colado que pode receber TROCA: você trouxe outra cópia do mesmo
+   tipo na mão. Soltar aqui substitui a que estava. */
+.slot-trocavel > * { opacity: .45; }
+.troca-colar {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--luz);
+  background: color-mix(in srgb, var(--papel2) 55%, transparent);
+  border-radius: 7px;
+  z-index: 3;
+  animation: mais-respira 1.1s ease-in-out infinite;
+}
+
 /* colada: papel levemente torto, com sombra de adesivo */
 .slot-colada {
   filter: drop-shadow(0 3px 5px rgba(0,0,0,.6));
@@ -331,7 +348,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .virando-frente, .virando-tras, .sombra-varrida, .sombra-dobra,
-  .colando, .colando::after, .moldura-aura, .slot-alvo, .mais-colar {
+  .colando, .colando::after, .moldura-aura, .slot-alvo, .mais-colar, .troca-colar {
     animation: none !important;
   }
 }

@@ -3,7 +3,8 @@ import { supabase } from '../lib/supabase'
 import { useSessao } from '../lib/sessao'
 import { Figurinha, serialDe } from '../componentes/Figurinha'
 import { CartaAberta } from '../componentes/CartaAberta'
-import { ROTULO_TIER, TIERS, type Carta, type Tier } from '../lib/tipos'
+import { ROTULO_TIER, COR_TIER, TIERS, type Carta, type Tier } from '../lib/tipos'
+import '../styles/menu.css'
 import '../styles/album.css'
 
 /**
@@ -53,6 +54,11 @@ export default function Album() {
   const [ponteiro, setPonteiro] = useState({ x: 0, y: 0 })
   const [slotAlvo, setSlotAlvo] = useState<number | null>(null)
   const [colandoAgora, setColandoAgora] = useState<number | null>(null)
+  // qual repetida vai ser colada, por card_type. Elas NAO sao iguais: serial,
+  // selo e desgaste mudam, entao a escolha e do jogador.
+  const [escolhida, setEscolhida] = useState<Map<number, number>>(new Map())
+  const [escolhendo, setEscolhendo] = useState<{ tipo: number; x: number; y: number } | null>(null)
+  const gesto = useRef<{ x: number; y: number; carta: Carta; tipo: number } | null>(null)
 
   const carregar = useCallback(async () => {
     if (!jogador) return
@@ -118,6 +124,33 @@ export default function Album() {
     de: tipos.length,
   }), [coladasValidas, minhas, tipos])
 
+  // Toque seco abre o seletor de repetida; arrastar comeca depois de 5px.
+  // Sem essa distincao nao daria para ter os dois gestos no mesmo alvo.
+  useEffect(() => {
+    const g = gesto.current
+    if (!g || arrastando) return
+    const mover = (e: PointerEvent) => {
+      if (Math.hypot(e.clientX - g.x, e.clientY - g.y) < 5) return
+      setPonteiro({ x: e.clientX, y: e.clientY })
+      setArrastando(g.carta)
+      gesto.current = null
+    }
+    const soltar = (e: PointerEvent) => {
+      if (gesto.current) {
+        setEscolhendo({ tipo: g.tipo, x: e.clientX, y: e.clientY })
+        gesto.current = null
+      }
+      limpar()
+    }
+    const limpar = () => {
+      window.removeEventListener('pointermove', mover)
+      window.removeEventListener('pointerup', soltar)
+    }
+    window.addEventListener('pointermove', mover)
+    window.addEventListener('pointerup', soltar)
+    return limpar
+  })
+
   // ------------------------------------------------------------- arraste
   useEffect(() => {
     if (!arrastando) return
@@ -134,6 +167,8 @@ export default function Album() {
       setArrastando(null); setSlotAlvo(null)
       if (alvo == null || !carta) return
       setColandoAgora(alvo)
+      // `colar` faz upsert por (jogador, card_type): soltar sobre um slot ja
+      // colado TROCA a figurinha que estava la.
       const { error } = await supabase.rpc('colar', { p_copy_id: carta.copy_id })
       if (!error) setColadas((m) => new Map(m).set(alvo, carta.copy_id))
       setTimeout(() => setColandoAgora(null), 700)
@@ -168,9 +203,14 @@ export default function Album() {
     atual.tier === 'selados'
       ? []
       : tipos.filter((t) => t.tier === atual.tier).map((t) => t.id))
+  // O deck mostra o que da para colar E o que da para TROCAR: se o slot ja
+  // esta colado mas você tem outra cópia daquele tipo, ela continua na mão.
+  // Colei uma comum e depois saiu uma selada? a selada aparece para trocar.
   const deck = minhas.filter((c) => {
     const tid = (c as any).card_type_id
-    return doSpread.has(tid) && !coladasValidas.has(tid)
+    if (!doSpread.has(tid)) return false
+    const colada = coladasValidas.get(tid)
+    return !colada || colada.copy_id !== c.copy_id
   })
   const porTipoNoDeck = new Map<number, Carta[]>()
   for (const c of deck) {
@@ -242,27 +282,75 @@ export default function Album() {
         <div className="deck">
           <p className="mb-1.5 text-[11px] uppercase tracking-widest text-neutral-500">
             {deck.length > 0
-              ? 'arraste para o slot vazio'
+              ? 'arraste para o slot · toque para escolher qual repetida'
               : 'nada para colar nesta página'}
           </p>
           <div className="deck-trilho">
-            {[...porTipoNoDeck.entries()].map(([tid, cs]) => (
-              <div
-                key={tid}
-                className={`deck-carta ${arrastando?.copy_id === cs[0].copy_id ? 'arrastando' : ''}`}
-                onPointerDown={(e) => {
-                  e.preventDefault()
-                  setPonteiro({ x: e.clientX, y: e.clientY })
-                  setArrastando(cs[0])
-                }}
-              >
-                {cs.length > 1 && <span className="deck-badge">+{cs.length - 1}</span>}
-                <Figurinha carta={cs[0]} tamanho="miniatura" />
-              </div>
-            ))}
+            {[...porTipoNoDeck.entries()].map(([tid, cs]) => {
+              const alvo = cs.find((c) => c.copy_id === escolhida.get(tid)) ?? cs[0]
+              return (
+                <div
+                  key={tid}
+                  className={`deck-carta ${arrastando?.copy_id === alvo.copy_id ? 'arrastando' : ''}`}
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    gesto.current = { x: e.clientX, y: e.clientY, carta: alvo, tipo: tid }
+                  }}
+                >
+                  {cs.length > 1 && <span className="deck-badge">{cs.length}</span>}
+                  <Figurinha carta={alvo} tamanho="miniatura" />
+                  <p className="mt-0.5 truncate text-center text-[9px] text-neutral-500">
+                    {serialDe(alvo)}
+                  </p>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
+
+      {/* seletor de repetida: qual das suas vai para o álbum */}
+      {escolhendo && (() => {
+        const cs = porTipoNoDeck.get(escolhendo.tipo) ?? []
+        if (cs.length === 0) return null
+        const largura = 288
+        const x = Math.min(Math.max(escolhendo.x, largura / 2 + 10), window.innerWidth - largura / 2 - 10)
+        return (
+          <>
+            <div className="fixed inset-0 z-50" onClick={() => setEscolhendo(null)} />
+            <div className="leque" style={{ left: x, top: Math.max(escolhendo.y - 240, 60) }}>
+              <div className="leque-topo">
+                <b style={{ color: COR_TIER[cs[0].tier] }}>{cs[0].skin}</b>
+                <span>qual colar?</span>
+              </div>
+              <div className="leque-lista">
+                {cs.map((c) => {
+                  const marcada = (escolhida.get(escolhendo.tipo) ?? cs[0].copy_id) === c.copy_id
+                  return (
+                    <button key={c.copy_id} className="leque-linha w-full"
+                      onClick={() => {
+                        setEscolhida((m) => new Map(m).set(escolhendo.tipo, c.copy_id))
+                        setEscolhendo(null)
+                      }}>
+                      <span className="leque-serial">
+                        <span style={{ color: COR_TIER[c.tier] }}>{serialDe(c)}</span>
+                        {marcada && <span className="tag tag-melhor">escolhida</span>}
+                        {c.seal !== 'none' && <span className="tag tag-selo">{c.seal}</span>}
+                        {c.origin === 'forge' && <span className="tag tag-forjada">forjada</span>}
+                        {c.damage_level > 0 && <span className="tag tag-desgaste">nv {c.damage_level}</span>}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="leque-rodape">
+                As repetidas não são iguais: serial, selo e desgaste mudam. A que ficar no álbum
+                é a que você colar.
+              </p>
+            </div>
+          </>
+        )
+      })()}
 
       {/* fantasma seguindo o dedo */}
       {arrastando && (
@@ -399,12 +487,15 @@ function Slot({ tipo, carta, alvo, marcado, colando, aoAbrir }: {
   return (
     <div>
       <button data-slot={tipo.id} onClick={() => aoAbrir(carta)}
-        className={`slot slot-colada block w-full ${colando ? 'colando' : ''}`}>
+        className={`slot slot-colada block w-full ${colando ? 'colando' : ''}
+                    ${marcado ? 'slot-trocavel' : ''} ${alvo ? 'slot-alvo' : ''}`}>
         <Figurinha carta={carta} tamanho="miniatura" />
         {carta.origin === 'forge' && <span className="marca-forjada">FORJADA</span>}
+        {/* já tem uma colada e você trouxe outra: soltar aqui TROCA */}
+        {marcado && <span className="troca-colar">⇄</span>}
       </button>
-      <p className="mt-1 truncate text-center text-[10px] text-neutral-500">
-        {nome} <span className="text-neutral-700">{serialDe(carta)}</span>
+      <p className={`mt-1 truncate text-center text-[10px] ${marcado ? 'text-[var(--luz)]' : 'text-neutral-500'}`}>
+        {marcado ? 'trocar por esta' : <>{nome} <span className="text-neutral-700">{serialDe(carta)}</span></>}
       </p>
     </div>
   )
