@@ -27,14 +27,16 @@ type Par = { nickname: string; personagem: string; nome: string; em: string }
 type Rank = {
   nickname: string; copias: number; selos: number
   melhor_serial: number | null; unos: number; pontos: number
+  /** menos cópias iguais no mundo entre as cartas do jogador */
+  mais_escassa: number | null
   /** os três troféus, cada um com critério próprio (ver private.pontos_carta) */
-  joia: Carta | null
-  menor_serial: Carta | null
-  melhor_selo: Carta | null
+  joia: CartaComDono | null
+  menor_serial: CartaComDono | null
+  melhor_selo: CartaComDono | null
   destaques: Carta[]
 }
 /** Troféu do servidor: a mesma carta, mais o nome de quem tem. */
-type CartaComDono = Carta & { dono: string }
+type CartaComDono = Carta & { dono: string; iguais_no_mundo?: number }
 type Mundo = {
   joia: CartaComDono | null
   menor_serial: CartaComDono | null
@@ -45,7 +47,7 @@ type Mundo = {
 
 /** Os três troféus, sempre nesta ordem e com o mesmo rótulo nas duas abas. */
 const TROFEUS: [keyof Pick<Mundo, 'joia' | 'menor_serial' | 'melhor_selo'>, string, string][] = [
-  ['joia',         'a joia',       'a mais rara possível'],
+  ['joia',         'a joia',       'menos cópias iguais no mundo'],
   ['menor_serial', 'menor serial', 'o número mais baixo'],
   ['melhor_selo',  'melhor selo',  'rosa > preto > branco'],
 ]
@@ -57,11 +59,16 @@ const TROFEUS: [keyof Pick<Mundo, 'joia' | 'menor_serial' | 'melhor_selo'>, stri
  * e a carta saia do tamanho de um poster, maior que o proprio acervo logo
  * abaixo.
  */
-function Trofeu({ rotulo, criterio, carta, dono, aoAbrir }: {
+function Trofeu({ rotulo, criterio, carta, dono, aoAbrir, mostrarEscassez }: {
   rotulo: string; criterio?: string
-  carta: Carta | null; dono?: string | null
+  /** so a joia mede escassez; nos outros dois o numero seria ruido */
+  mostrarEscassez?: boolean
+  carta: (Carta & { iguais_no_mundo?: number }) | null; dono?: string | null
   aoAbrir: (c: Carta) => void
 }) {
+  // Sem este numero o troféu vira opinião. Com ele, qualquer um confere:
+  // "1 no mundo" ganha de "29 no mundo" e acabou a discussão.
+  const iguais = mostrarEscassez ? carta?.iguais_no_mundo : undefined
   return (
     <div className="flex flex-col items-center gap-1">
       <span className="text-[10px] uppercase tracking-widest text-neutral-500">{rotulo}</span>
@@ -75,6 +82,11 @@ function Trofeu({ rotulo, criterio, carta, dono, aoAbrir }: {
                          border border-dashed border-neutral-800 text-xs text-neutral-700">—</span>
       )}
       {dono && <span className="text-xs font-medium text-neutral-300">{dono}</span>}
+      {iguais != null && (
+        <span className={`text-[10px] ${iguais === 1 ? 'text-[var(--acento)]' : 'text-neutral-500'}`}>
+          {iguais === 1 ? 'única no mundo' : `${iguais} iguais no mundo`}
+        </span>
+      )}
       {criterio && <span className="text-[10px] text-neutral-600">{criterio}</span>}
     </div>
   )
@@ -294,11 +306,14 @@ export default function Conquistas() {
         </div>
 
         <p className="mb-3 max-w-3xl text-xs leading-relaxed text-neutral-500">
-          Critério fixo, igual nas duas abas — se houver duas candidatas, o
-          desempate é sempre o mesmo.{' '}
-          <strong className="text-neutral-400">A joia</strong> é a mais rara possível:
-          raridade acima de tudo, depois selo, tiragem e serial, com desgaste
-          descontando e puxada valendo mais que forjada.{' '}
+          Critério fixo, igual nas duas abas.{' '}
+          <strong className="text-neutral-400">A joia</strong> é a carta com{' '}
+          <strong className="text-neutral-400">menos cópias iguais no mundo</strong> —
+          contadas no banco, sem peso escolhido por ninguém. Selo conta como
+          raridade de verdade: existem 90 cósmicas para um selo cair e quase
+          três mil comuns, então uma cósmica selada é muito mais improvável que
+          uma comum selada. Empate se resolve pela raridade maior, depois pelo
+          serial menor, com desgaste descontando e puxada valendo mais que forjada.{' '}
           <strong className="text-neutral-400">Menor serial</strong> empata pela
           tiragem menor e depois pela raridade.{' '}
           <strong className="text-neutral-400">Melhor selo</strong> vai de rosa a
@@ -321,6 +336,7 @@ export default function Conquistas() {
                 {TROFEUS.map(([chave, rotulo, criterio]) => (
                   <Trofeu key={chave} rotulo={rotulo} criterio={criterio}
                     carta={mundo[chave]} dono={mundo[chave]?.dono}
+                    mostrarEscassez={chave === 'joia'}
                     aoAbrir={(c) => setEmFoco({ lista: [c], i: 0 })} />
                 ))}
               </div>
@@ -341,12 +357,18 @@ export default function Conquistas() {
                   <span className="chip"><strong>{r.selos}</strong> selos</span>
                   <span className="chip"><strong>{r.unos}</strong> nº 1</span>
                   <span className="chip">melhor serial <strong>{r.melhor_serial ?? '—'}</strong></span>
+                  {r.mais_escassa != null && (
+                    <span className="chip">
+                      mais escassa: <strong>{r.mais_escassa}</strong> no mundo
+                    </span>
+                  )}
                   <span className="ml-auto text-neutral-500">{r.copias} cópias</span>
                 </div>
 
                 <div className="grid grid-cols-3 gap-3 border-t border-neutral-900 px-3 py-3">
                   {TROFEUS.map(([chave, rotulo]) => (
                     <Trofeu key={chave} rotulo={rotulo} carta={r[chave]}
+                      mostrarEscassez={chave === 'joia'}
                       aoAbrir={(c) => setEmFoco({ lista: [c], i: 0 })} />
                   ))}
                 </div>

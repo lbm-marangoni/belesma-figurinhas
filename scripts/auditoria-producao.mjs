@@ -120,7 +120,6 @@ select jsonb_build_object(
   'reserva_fora_de_comum_incomum', (select count(*) from card_copies cc
       join card_types ct on ct.id=cc.card_type_id
       where cc.reserved_for_daily and ct.tier not in ('comum','incomum')),
-  'reserva_com_dono', (select count(*) from card_copies where reserved_for_daily and owner_id is not null),
   'estreia_sem_descobridor', (select count(*) from card_copies
       where first_discovered_at is not null and first_discovered_by is null),
   'descobridor_sem_data', (select count(*) from card_copies
@@ -156,7 +155,9 @@ select jsonb_build_object(
   'branco', (select count(*) from card_copies where seal='branco'),
   'preto',  (select count(*) from card_copies where seal='preto'),
   'rosa',   (select count(*) from card_copies where seal='rosa'),
-  'reserva',(select count(*) from card_copies where reserved_for_daily and not burned),
+  'reserva',(select count(*) from card_copies
+             where reserved_for_daily and not burned and owner_id is null),
+  'reserva_marcada',(select count(*) from card_copies where reserved_for_daily and not burned),
   'pack_config_fora_de_100', (select coalesce(jsonb_agg(pack_type||'/'||slot||'='||soma), '[]'::jsonb)
       from (select pack_type::text, slot::text, sum(weight) as soma from pack_config
             group by 1,2 having abs(sum(weight) - 100) > 0.001) x),
@@ -171,7 +172,11 @@ checar('3 personagens no lancamento', Number(m.personagens) === 3, m.personagens
 checar('selos 36 / 12 / 3',
   Number(m.branco) === 36 && Number(m.preto) === 12 && Number(m.rosa) === 3,
   `${m.branco}/${m.preto}/${m.rosa}`)
-checar('reserva diaria em 1500', Number(m.reserva) === 1500, m.reserva)
+// A flag continua na copia mesmo depois de entregue, para que ela volte a
+// reserva se for vendida. Entao o que se cobra e a reserva DISPONIVEL: e ela
+// que o diario consome, e e ela que o claim_daily repoe.
+checar('reserva diaria disponivel em 1500', Number(m.reserva) === 1500,
+  `${m.reserva} disponiveis de ${m.reserva_marcada} marcadas`)
 checar('toda tabela de pack_config soma 100',
   m.pack_config_fora_de_100.length === 0, String(m.pack_config_fora_de_100))
 console.log(`   ${m.jogadores} jogadores · ${m.com_dono} copias em maos · ` +

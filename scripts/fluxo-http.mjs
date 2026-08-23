@@ -130,12 +130,20 @@ checar('indice global continua publico', (total ?? 0) >= 6642, `${total} linhas`
 
 // ================================================================ admin
 console.log('\n== /admin so para admin ==')
+// Cargas INERTES de proposito.
+//
+// require_admin() roda antes de qualquer coisa, entao o teste prova a mesma
+// negacao com um alvo que nao existe e uma confirmacao errada. A diferenca
+// aparece no dia em que a autorizacao quebrar: com 'todos' e 'RESETAR' o
+// teste viraria o estrago que deveria denunciar. E teste roda em producao.
 for (const [nome, chamada] of [
   ['admin_jogadores', c.rpc('admin_jogadores')],
   ['admin_stock_report', c.rpc('admin_stock_report')],
-  ['grant_packs', c.rpc('grant_packs', { p_target: 'todos', p_pack_type: 'ultra', p_quantidade: 99 })],
+  ['grant_packs', c.rpc('grant_packs',
+    { p_target: '__ninguem__', p_pack_type: 'ultra', p_quantidade: 99 })],
   ['seed_edition', c.rpc('seed_edition', { p_params: { slug: 'invasor' } })],
-  ['admin_reset_all_collections', c.rpc('admin_reset_all_collections', { p_confirmacao: 'RESETAR' })],
+  ['admin_reset_all_collections', c.rpc('admin_reset_all_collections',
+    { p_confirmacao: 'nao-confirmado' })],
 ]) {
   const { error } = await chamada
   checar(`jogador comum: ${nome} negado`, !!error, error?.message?.slice(0, 40))

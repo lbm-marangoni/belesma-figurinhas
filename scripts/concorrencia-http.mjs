@@ -69,8 +69,27 @@ for (let i = 0; i < N_JOGADORES; i++) {
 // allotment inicial e 12/5/2; garante pacote suficiente
 const chefe = clientes[0]
 await admin.from('players').update({ is_admin: true }).eq('id', chefe.id)
-await chefe.c.rpc('grant_packs', { p_target: 'todos', p_pack_type: 'comum', p_quantidade: PACOTES })
+
+// UM POR UM, nunca 'todos'.
+//
+// Isto dizia `p_target: 'todos'` e o grant_packs entende 'todos' ao pe da
+// letra: `where p_target = 'todos' or nickname = ...`. Cada rodada deste
+// teste dava 12 pacotes comuns a TODOS os jogadores do banco - os de
+// verdade junto - e a limpeza ainda apagava a linha do admin_log, entao nao
+// sobrava nem rastro. Medido: os tres jogadores reais estavam com +12.
+//
+// Teste que roda em producao nao pode ter alvo coletivo. Nenhum.
+for (const { nick } of clientes) {
+  await chefe.c.rpc('grant_packs',
+    { p_target: nick, p_pack_type: 'comum', p_quantidade: PACOTES })
+}
 await admin.from('players').update({ is_admin: false }).eq('id', chefe.id)
+
+// Fotografia dos jogadores REAIS, para cobrar no fim que nada os tocou.
+const reaisAntes = Object.fromEntries(
+  ((await admin.from('players').select('nickname, packs_common, packs_rare, packs_ultra, baba')).data ?? [])
+    .filter((p) => !clientes.some((c) => c.nick === p.nickname))
+    .map((p) => [p.nickname, JSON.stringify(p)]))
 
 const antes = await admin.from('card_copies').select('id', { count: 'exact', head: true }).not('owner_id', 'is', null)
 
@@ -220,6 +239,15 @@ const { data: sobrando } = await admin.from('players')
   .select('nickname').in('nickname', clientes.map((c) => c.nick))
 checar('nenhum jogador de teste sobrou', (sobrando ?? []).length === 0,
   (sobrando ?? []).map((p) => p.nickname).join(', ') || 'nenhum')
+// Nenhum jogador REAL pode ter sido tocado por este teste.
+{
+  const depois = Object.fromEntries(
+    ((await admin.from('players').select('nickname, packs_common, packs_rare, packs_ultra, baba')).data ?? [])
+      .map((p) => [p.nickname, JSON.stringify(p)]))
+  const mexidos = Object.keys(reaisAntes).filter((n) => reaisAntes[n] !== depois[n])
+  checar('nenhum jogador real teve pacote ou baba alterado', mexidos.length === 0,
+    mexidos.map((n) => `${n}: ${reaisAntes[n]} -> ${depois[n]}`).join(' | ') || 'nenhum')
+}
 
 console.log(`\n${falhas === 0 ? 'TUDO PASSOU' : falhas + ' FALHA(S)'}`)
 process.exit(falhas === 0 ? 0 : 1)

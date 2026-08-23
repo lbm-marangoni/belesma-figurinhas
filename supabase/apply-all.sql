@@ -4667,4 +4667,439 @@ grant execute on function public.admin_recomecar_do_zero(text)       to authenti
 alter table public.skins enable row level security;
 
 
+-- ===== 20260823100000_joia_por_escassez.sql =====
+-- BELESMA figurinhas - "a joia" passa a medir escassez de verdade
+
+-- ================================================================ por que
+-- A versao anterior somava pesos que EU escolhi: raridade x 1.000.000, selo
+-- x 100.000. Isso poe o selo a um decimo de um degrau de raridade, e a
+-- consequencia foi medida no servidor: uma cosmica + selo branco, da qual
+-- existe UMA no mundo inteiro, ficava atras de tres divinas, das quais
+-- existem 29.
+--
+-- O erro de fundo foi tratar a escada de tiers como se ela ja medisse
+-- escassez. Ela nao mede: o selo e um SEGUNDO eixo, e um selo cair numa
+-- cosmica e muito mais improvavel do que cair numa comum, porque so existem
+-- 90 cosmicas para ele cair e quase tres mil comuns. Censo do set:
+--
+--   divina + selo preto      1 copia      (esperava-se 0,054)
+--   cosmica + selo branco    1            (esperava-se 0,49)
+--   prisma                   3
+--   diamante                 6
+--   infernal                15
+--   divina                  29
+--
+-- Agora o criterio nao tem peso nenhum inventado por mim: e a contagem.
+-- "A joia e a carta com menos copias iguais no mundo." Uma frase, conferivel
+-- por qualquer um, e que se ajusta sozinha quando o quarto personagem
+-- entrar por seed_edition.
+create or replace view private.censo_raridade as
+select ct.tier, cc.seal, count(*)::int as copias
+from public.card_copies cc
+join public.card_types ct on ct.id = cc.card_type_id
+where not cc.burned
+group by 1, 2;
+
+-- ================================================================ pontuacao
+-- O primeiro termo domina por construcao: mesmo entre as classes mais
+-- povoadas (rara com 1200 copias contra incomum com ~1300) a diferenca passa
+-- de 60.000 pontos, e a soma de TODOS os desempates nao chega a 7.000. Logo
+-- nenhum desempate inverte uma diferenca de escassez - eles so decidem
+-- dentro da mesma classe.
+drop function if exists private.pontos_carta(smallint, public.seal_type, int, int, public.copy_origin, int);
+
+create or replace function private.pontos_carta(
+  p_copias_iguais int,          -- do censo: quantas ha no mundo com este tier E este selo
+  p_tier_order    smallint,
+  p_serial        int,
+  p_origin        public.copy_origin,
+  p_damage        int)
+returns numeric
+language sql immutable
+as $fn$
+  select
+      -- escassez: o eixo. Menos copias iguais, mais pontos.
+      1000000000.0 / greatest(p_copias_iguais, 1)
+      -- entre duas classes igualmente escassas, a mais alta na escada
+    + p_tier_order * 500
+      -- serial baixo, e o 1/N valendo extra
+    + (case when p_serial = 1 then 400
+            when p_serial is null then 0
+            else greatest(0, 300 - p_serial) end)
+      -- puxada vale mais que forjada: forja e supply paralelo
+    + (case when p_origin = 'pull' then 200 else 0 end)
+      -- conservacao
+    - p_damage * 150
+$fn$;
+
+-- ================================================================ por jogador
+create or replace function public.ranking_serial()
+returns jsonb
+language sql stable security definer
+set search_path = public, extensions, pg_temp
+as $fn$
+  with pontuadas as (
+    select cc.id, cc.owner_id, cc.serial_number, cc.seal, cc.origin, cc.forge_index,
+           cc.damage_level, cc.verify_code, cc.card_type_id,
+           ct.print_run, ct.tier, ct.tier_order, ct.skin, ch.slug, ch.name,
+           censo.copias as iguais_no_mundo,
+           private.pontos_carta(censo.copias, ct.tier_order, cc.serial_number,
+                                cc.origin, cc.damage_level) as pontos
+    from public.card_copies cc
+    join public.card_types ct on ct.id = cc.card_type_id
+    join public.characters ch on ch.id = ct.character_id
+    join private.censo_raridade censo on censo.tier = ct.tier and censo.seal = cc.seal
+    where cc.owner_id is not null and not cc.burned
+  ),
+  agregado as (
+    select owner_id,
+           count(*)                                            as copias,
+           count(*) filter (where seal <> 'none')               as selos,
+           count(*) filter (where serial_number = 1)            as unos,
+           min(serial_number) filter (where origin = 'pull')    as melhor_serial,
+           min(iguais_no_mundo)                                 as mais_escassa,
+           round(sum(pontos) / 1000000.0, 1)                    as pontos_total
+    from pontuadas group by owner_id
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'nickname', p.nickname,
+    'copias', a.copias, 'selos', a.selos, 'unos', a.unos,
+    'melhor_serial', a.melhor_serial,
+    'mais_escassa', a.mais_escassa,
+    'pontos', a.pontos_total,
+
+    'joia',   (select to_jsonb(x) from (
+                select id as copy_id, serial_number, print_run, seal, origin, forge_index,
+                       damage_level, verify_code, card_type_id, tier, tier_order, skin,
+                       slug as character_slug, name as character_name, iguais_no_mundo
+                from pontuadas where owner_id = a.owner_id
+                order by pontos desc limit 1) x),
+    'menor_serial', (select to_jsonb(x) from (
+                select id as copy_id, serial_number, print_run, seal, origin, forge_index,
+                       damage_level, verify_code, card_type_id, tier, tier_order, skin,
+                       slug as character_slug, name as character_name, iguais_no_mundo
+                from pontuadas where owner_id = a.owner_id and origin = 'pull'
+                order by serial_number, print_run, tier_order desc limit 1) x),
+    'melhor_selo', (select to_jsonb(x) from (
+                select id as copy_id, serial_number, print_run, seal, origin, forge_index,
+                       damage_level, verify_code, card_type_id, tier, tier_order, skin,
+                       slug as character_slug, name as character_name, iguais_no_mundo
+                from pontuadas where owner_id = a.owner_id and seal <> 'none'
+                order by case seal when 'rosa' then 3 when 'preto' then 2 else 1 end desc,
+                         tier_order desc, serial_number limit 1) x),
+
+    'destaques', (select coalesce(jsonb_agg(to_jsonb(x) order by x.pontos desc), '[]'::jsonb)
+                  from (
+                    select id as copy_id, serial_number, print_run, seal, origin, forge_index,
+                           damage_level, verify_code, card_type_id, tier, tier_order, skin,
+                           slug as character_slug, name as character_name,
+                           iguais_no_mundo, pontos
+                    from pontuadas where owner_id = a.owner_id
+                    order by pontos desc limit 8) x)
+  ) order by a.pontos_total desc), '[]'::jsonb)
+  from agregado a join public.players p on p.id = a.owner_id;
+$fn$;
+
+-- ================================================================ do servidor
+create or replace function public.trofeus_do_mundo()
+returns jsonb
+language sql stable security definer
+set search_path = public, extensions, pg_temp
+as $fn$
+  with pontuadas as (
+    select cc.id as copy_id, cc.serial_number, cc.seal, cc.origin, cc.forge_index,
+           cc.damage_level, cc.verify_code, cc.card_type_id,
+           ct.print_run, ct.tier, ct.tier_order, ct.skin,
+           ch.slug as character_slug, ch.name as character_name,
+           p.nickname as dono,
+           censo.copias as iguais_no_mundo,
+           private.pontos_carta(censo.copias, ct.tier_order, cc.serial_number,
+                                cc.origin, cc.damage_level) as pontos
+    from public.card_copies cc
+    join public.card_types ct on ct.id = cc.card_type_id
+    join public.characters ch on ch.id = ct.character_id
+    join public.players p on p.id = cc.owner_id
+    join private.censo_raridade censo on censo.tier = ct.tier and censo.seal = cc.seal
+    where cc.owner_id is not null and not cc.burned
+  )
+  select jsonb_build_object(
+    'joia', (select to_jsonb(x) from (
+              select * from pontuadas order by pontos desc, copy_id limit 1) x),
+    'menor_serial', (select to_jsonb(x) from (
+              select * from pontuadas where origin = 'pull'
+              order by serial_number, print_run, tier_order desc, copy_id limit 1) x),
+    'melhor_selo', (select to_jsonb(x) from (
+              select * from pontuadas where seal <> 'none'
+              order by case seal when 'rosa' then 3 when 'preto' then 2 else 1 end desc,
+                       tier_order desc, serial_number, copy_id limit 1) x),
+    'em_jogo', (select count(*) from pontuadas),
+    'donos',   (select count(distinct dono) from pontuadas)
+  );
+$fn$;
+
+alter function public.ranking_serial()    owner to postgres;
+alter function public.trofeus_do_mundo()  owner to postgres;
+grant execute on function public.ranking_serial()   to anon, authenticated;
+grant execute on function public.trofeus_do_mundo() to anon, authenticated;
+
+-- o censo vive em private: ninguem de fora precisa da view crua
+revoke all on private.censo_raridade from public, anon, authenticated;
+
+
+-- ===== 20260823110000_reserva_diaria_e_grants.sql =====
+-- BELESMA figurinhas - a reserva do diario vazava, e o grant residual voltou
+
+-- ================================================================ 1. reserva
+-- BUG: `private.reservar_diario` contava como reserva TODA copia com a flag
+-- `reserved_for_daily`, inclusive as que ja tinham dono. Como o open_pack
+-- nunca limpa a flag ao entregar a carta, cada carta de diario reclamada
+-- continuava sendo contada como se ainda estivesse na prateleira.
+--
+-- Efeito: a reposicao achava a reserva cheia e nao repunha nada. Medido na
+-- producao com 3 jogadores e poucos dias de jogo:
+--
+--   com a flag, nao queimadas .... 1488   <- o que a funcao contava
+--   de fato disponiveis .......... 1472   <- o que existia para sortear
+--   ja com dono .................. 16
+--
+-- 16 em poucos dias. A reserva e de 1500 e o consumo e de ~3 cartas por
+-- jogador por dia; a conta errada vai drenando ate o diario nao ter mais de
+-- onde sortear, e nada avisa.
+--
+-- A reserva e o conjunto de copias DISPONIVEIS e marcadas. Copia com dono
+-- saiu da prateleira, mesmo que a flag continue nela - e a flag continua de
+-- proposito, para que a copia volte para a reserva se for vendida.
+create or replace function private.reservar_diario(p_character_id int, p_alvo int)
+returns int
+language plpgsql
+volatile
+security definer
+set search_path = public, extensions, pg_temp
+as $fn$
+declare
+  ja_tem int;
+  faltam int;
+begin
+  select count(*) into ja_tem
+  from public.card_copies cc
+  join public.card_types ct on ct.id = cc.card_type_id
+  where ct.character_id = p_character_id
+    and cc.reserved_for_daily
+    and not cc.burned
+    and cc.owner_id is null;          -- <- o conserto
+
+  faltam := p_alvo - ja_tem;
+  if faltam <= 0 then return 0; end if;
+
+  with candidatas as (
+    select cc.id
+    from public.card_copies cc
+    join public.card_types ct on ct.id = cc.card_type_id
+    join public.tiers t on t.slug = ct.tier
+    where ct.character_id = p_character_id
+      and t.slug in ('comum','incomum')
+      and cc.owner_id is null
+      and not cc.burned
+      and not cc.reserved_for_daily
+    order by extensions.gen_random_bytes(8)
+    limit faltam
+  )
+  update public.card_copies set reserved_for_daily = true
+  where id in (select id from candidatas);
+
+  return faltam;
+end;
+$fn$;
+
+-- O top_up tinha a mesma conta errada no alvo que passa para a funcao.
+create or replace function public.top_up_daily_reserve(p_n int)
+returns int
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $fn$
+declare v_por_char int; v_total int := 0; v_c record;
+begin
+  perform private.require_admin();
+  if p_n is null or p_n <= 0 then raise exception 'n invalido'; end if;
+
+  v_por_char := ceil(p_n::numeric / greatest((select count(*) from public.characters), 1));
+  for v_c in select id from public.characters order by id loop
+    v_total := v_total + private.reservar_diario(v_c.id,
+      (select count(*) from public.card_copies cc
+       join public.card_types ct on ct.id = cc.card_type_id
+       where ct.character_id = v_c.id and cc.reserved_for_daily
+         and not cc.burned and cc.owner_id is null)::int + v_por_char);
+  end loop;
+
+  perform private.registrar('top_up_daily_reserve', null,
+    jsonb_build_object('pedido', p_n, 'reservadas', v_total));
+  return v_total;
+end;
+$fn$;
+
+-- ---------------------------------------------------------------- auto
+-- Repor a reserva era so manual, por RPC de admin. Isso e um alarme que
+-- depende de alguem lembrar: o diario simplesmente para de ter estoque num
+-- dia qualquer, sem aviso. Agora o proprio claim_daily devolve a reserva ao
+-- alvo depois de servir - custa uma contagem por personagem, com 8 amigos
+-- reclamando uma vez por dia.
+create or replace function private.repor_reserva()
+returns int
+language plpgsql volatile
+set search_path = public, extensions, pg_temp
+as $fn$
+declare v_alvo int; v_total int := 0; v_c record;
+begin
+  -- o alvo por personagem vem do seed: 1500 divididos entre os personagens
+  v_alvo := (1500 / greatest((select count(*) from public.characters), 1))::int;
+  for v_c in select id from public.characters order by id loop
+    v_total := v_total + private.reservar_diario(v_c.id, v_alvo);
+  end loop;
+  return v_total;
+end;
+$fn$;
+
+revoke all on function private.repor_reserva() from public, anon, authenticated;
+
+-- ================================================================ 2. grants
+-- O grant automatico para PUBLIC voltou, exatamente como o comentario da
+-- migracao de ontem previu: `private.pontos_carta` mudou de assinatura, e
+-- funcao nova nasce aberta. A auditoria de producao pegou na primeira
+-- rodada seguinte.
+--
+-- Vira funcao, para as proximas migracoes so precisarem chamar no fim.
+create or replace function private.fechar_grants()
+returns int
+language plpgsql volatile
+set search_path = public, extensions, pg_temp
+as $fn$
+declare f record; n int := 0;
+begin
+  for f in
+    select p.oid::regprocedure as assinatura
+    from pg_proc p join pg_namespace n2 on n2.oid = p.pronamespace
+    where n2.nspname = 'private'
+  loop
+    execute format('revoke all on function %s from public, anon, authenticated', f.assinatura);
+    n := n + 1;
+  end loop;
+
+  for f in
+    select p.oid::regprocedure as assinatura
+    from pg_proc p join pg_namespace n2 on n2.oid = p.pronamespace
+    where n2.nspname = 'public'
+      and array_to_string(coalesce(p.proacl, '{}'), ',') like '=X/%'
+  loop
+    execute format('revoke all on function %s from public', f.assinatura);
+    n := n + 1;
+  end loop;
+  return n;
+end;
+$fn$;
+
+select private.fechar_grants();
+revoke all on function private.fechar_grants() from public, anon, authenticated;
+
+-- ---------------------------------------------------------------- claim_daily
+-- Passa a repor a reserva depois de servir. Ver o comentario dentro.
+create or replace function public.claim_daily()
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions, pg_temp
+as $fn$
+declare
+  p            public.players;
+  v_comuns     int;
+  v_raros      int;
+  v_ciclo      int;
+  v_ultra      boolean;
+  v_streak     int;
+  v_bonus      int;
+  v_extra      int := 0;
+  v_espera     interval;
+begin
+  if auth.uid() is null then raise exception 'precisa estar logado' using errcode = '42501'; end if;
+
+  select * into p from public.players where id = auth.uid() for update;
+  if p.id is null then raise exception 'jogador nao encontrado'; end if;
+
+  if p.last_daily_at is not null and p.last_daily_at > now() - interval '24 hours' then
+    v_espera := (p.last_daily_at + interval '24 hours') - now();
+    raise exception 'o diario volta em %', to_char(v_espera, 'HH24"h"MI"min"');
+  end if;
+
+  v_comuns := (select valor from public.pack_params where chave = 'diario_comuns')::int;
+  v_raros  := (select valor from public.pack_params where chave = 'diario_raros')::int;
+  v_ciclo  := (select valor from public.pack_params where chave = 'diario_ultra_ciclo')::int;
+
+  -- streak: mantem se resgatou nas ultimas 48h, senao recomeca
+  v_streak := case
+    when p.last_daily_at is not null and p.last_daily_at > now() - interval '48 hours'
+      then (p.dailies_claimed % 7) + 1
+    else 1 end;
+
+  v_ultra := (p.dailies_claimed + 1) % v_ciclo = 0;
+
+  update public.players set
+    packs_common_daily = packs_common_daily + v_comuns,
+    packs_rare_daily   = packs_rare_daily   + v_raros,
+    packs_ultra_daily  = packs_ultra_daily  + (case when v_ultra then 1 else 0 end),
+    last_daily_at      = now(),
+    dailies_claimed    = case
+      when p.last_daily_at is not null and p.last_daily_at > now() - interval '48 hours'
+        then dailies_claimed + 1
+      else 1 end
+  where id = p.id;
+
+  v_bonus := (select valor from public.economy_config where chave = 'bonus_login')::int;
+  if v_streak = 7 then
+    v_extra := (select valor from public.economy_config where chave = 'bonus_login_streak7')::int;
+  end if;
+  perform private.mover_baba(p.id, v_bonus + v_extra, 'login diario',
+                             'streak ' || v_streak::text);
+
+  -- Repor a prateleira do diario aqui, e nao so por RPC de admin. A reserva
+  -- e consumida justamente por esta funcao; deixar a reposicao dependendo de
+  -- alguem lembrar significa que um dia o diario para sem aviso.
+  perform private.repor_reserva();
+
+  return jsonb_build_object(
+    'comuns', v_comuns, 'raros', v_raros, 'ultra', v_ultra,
+    'streak', v_streak, 'baba', v_bonus + v_extra,
+    'proximo_ultra_em', case when v_ultra then v_ciclo else v_ciclo - ((p.dailies_claimed + 1) % v_ciclo) end);
+end;
+$fn$;
+
+alter function public.claim_daily() owner to postgres;
+grant execute on function public.claim_daily() to authenticated;
+select private.fechar_grants();
+
+
+-- ===== 20260823120000_censo_publico.sql =====
+-- BELESMA figurinhas - o censo de escassez fica visivel para o cliente
+
+-- O filtro "mais rara primeiro" da Colecao ordenava so por tier_order, o
+-- mesmo defeito que a joia tinha: uma cosmica com selo, unica no mundo,
+-- aparecia embaixo de qualquer divina. Para a tela usar o criterio de
+-- verdade ela precisa do censo, e o censo e informacao publica - o indice
+-- global ja diz quantas copias de cada tipo existem.
+--
+-- Devolve a tabela inteira de uma vez: sao ~30 linhas, e o cliente resolve
+-- as ordenacoes localmente sem uma consulta por carta.
+create or replace function public.escassez_por_classe()
+returns jsonb
+language sql stable security definer
+set search_path = public, extensions, pg_temp
+as $fn$
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'tier', tier, 'seal', seal, 'copias', copias) order by copias, tier), '[]'::jsonb)
+  from private.censo_raridade;
+$fn$;
+
+alter function public.escassez_por_classe() owner to postgres;
+grant execute on function public.escassez_por_classe() to anon, authenticated;
+
+select private.fechar_grants();
+
+
 commit;

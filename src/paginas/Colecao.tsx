@@ -11,12 +11,16 @@ import { ROTULO_TIER, TIERS, type Carta, type Selo, type Tier } from '../lib/tip
 type Ordem = 'raridade' | 'raridade-asc' | 'personagem' | 'skin'
            | 'serial' | 'repetidas' | 'recentes'
 
-/** Repetidas do mesmo card_type empilham. A da frente é a de melhor serial:
- *  selada tem prioridade, depois o menor número (spec §11). */
+/** Repetidas do mesmo card_type empilham. A da frente é a melhor: selada
+ *  na frente (rosa > preto > branco), depois inteira antes de estragada,
+ *  depois o menor número (spec §11). */
+const PESO_SELO: Record<string, number> = { rosa: 3, preto: 2, branco: 1, none: 0 }
 function melhorPrimeiro(a: Carta, b: Carta) {
-  const seladaA = a.seal !== 'none' ? 0 : 1
-  const seladaB = b.seal !== 'none' ? 0 : 1
-  if (seladaA !== seladaB) return seladaA - seladaB
+  const s = PESO_SELO[b.seal] - PESO_SELO[a.seal]
+  if (s !== 0) return s
+  // desgaste vinha sendo ignorado: uma nível 3 podia ficar na frente da
+  // intacta só por ter serial menor
+  if (a.damage_level !== b.damage_level) return a.damage_level - b.damage_level
   return a.serial_number - b.serial_number
 }
 
@@ -30,6 +34,8 @@ export default function Colecao() {
   const [tier, setTier] = useState<'todos' | Tier>('todos')
   const [selo, setSelo] = useState<'todos' | Exclude<Selo, 'none'> | 'nenhum'>('todos')
   const [ordem, setOrdem] = useState<Ordem>('raridade')
+  /** quantas cópias de cada (tier, selo) existem no mundo — vem do servidor */
+  const [censo, setCenso] = useState<Map<string, number>>(new Map())
   const [aberta, setAberta] = useState<string | null>(null)
   const [posLeque, setPosLeque] = useState({ x: 0, y: 0, seta: 50 })
   const [emFoco, setEmFoco] = useState<number | null>(null)
@@ -116,6 +122,27 @@ export default function Colecao() {
     await recarregarAcervo(); await recarregar()
   }
 
+  useEffect(() => {
+    supabase.rpc('escassez_por_classe').then(({ data }) => {
+      setCenso(new Map(((data ?? []) as { tier: string; seal: string; copias: number }[])
+        .map((r) => [`${r.tier}|${r.seal}`, Number(r.copias)])))
+    })
+  }, [])
+
+  /**
+   * Quantas cópias iguais a esta existem no mundo — mesmo número que decide
+   * a joia na Caçada de serial.
+   *
+   * Ordenar só por tier_order tratava o selo como enfeite: uma cósmica
+   * selada, única no mundo, caía abaixo de qualquer divina. O selo é um
+   * segundo eixo de escassez — um selo cair numa cósmica é muito mais
+   * improvável do que cair numa comum, porque há menos cósmicas para ele
+   * cair. Enquanto o censo não chega, cai no tier, que é a melhor
+   * aproximação disponível.
+   */
+  const iguaisNoMundo = (c: Carta) =>
+    censo.get(`${c.tier}|${c.seal}`) ?? (10000 - c.tier_order)
+
   const personagens = useMemo(
     () => [...new Set((cartas ?? []).map((c) => c.character_slug))].sort(), [cartas])
 
@@ -136,8 +163,10 @@ export default function Colecao() {
       .sort((A, B) => {
         const a = A.copias[0], b = B.copias[0]
         switch (ordem) {
-          case 'raridade':     return b.tier_order - a.tier_order || a.skin.localeCompare(b.skin)
-          case 'raridade-asc': return a.tier_order - b.tier_order || a.skin.localeCompare(b.skin)
+          case 'raridade':     return iguaisNoMundo(a) - iguaisNoMundo(b) ||
+                                      b.tier_order - a.tier_order || a.skin.localeCompare(b.skin)
+          case 'raridade-asc': return iguaisNoMundo(b) - iguaisNoMundo(a) ||
+                                      a.tier_order - b.tier_order || a.skin.localeCompare(b.skin)
           case 'personagem':   return a.character_slug.localeCompare(b.character_slug) ||
                                       a.tier_order - b.tier_order
           case 'skin':         return a.skin.localeCompare(b.skin) ||
@@ -149,7 +178,7 @@ export default function Colecao() {
           default:             return 0
         }
       })
-  }, [cartas, personagem, tier, selo, ordem])
+  }, [cartas, personagem, tier, selo, ordem, censo])
 
   // O overlay navega pela lista inteira que está na tela, na mesma ordem
   // das pilhas — seta pra direita continua de onde o olho parou.
@@ -172,7 +201,7 @@ export default function Colecao() {
                    ...selo3.map((s) => [s, `Selo ${s}`] as [string, string])]} />
         <Selecao valor={ordem} aoMudar={(v) => setOrdem(v as Ordem)}
           opcoes={[
-            ['raridade', 'Mais rara primeiro'],
+            ['raridade', 'Mais rara primeiro (escassez)'],
             ['raridade-asc', 'Mais comum primeiro'],
             ['personagem', 'Por personagem'],
             ['skin', 'Por skin (A–Z)'],
