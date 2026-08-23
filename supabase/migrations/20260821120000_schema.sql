@@ -506,6 +506,10 @@ $$;
 
 -- Secao 9: o proprio jogador precisa ler baba, pacotes e pity, que nao sao
 -- publicos. A leitura da linha inteira passa por aqui, nunca por GRANT.
+-- O drop antes do create nao e enfeite: uma migracao posterior troca o tipo
+-- de retorno para jsonb (o inventario passou a vir junto), e sem isto
+-- reaplicar a cadeia inteira estoura com "cannot change return type".
+drop function if exists public.me();
 create or replace function public.me()
 returns public.players
 language sql

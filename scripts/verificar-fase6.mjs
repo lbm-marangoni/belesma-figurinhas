@@ -181,11 +181,13 @@ await deveFalhar('nao restaura o que nao esta estragado', A,
 
 // ================================================================ loja
 console.log('\n== loja (spec §19.5) ==')
-const antesPac = await um(`select packs_common, baba from players where id=$1`, [A])
+const antesPac = await um(
+  `select private.tem_pacotes($1,'comum') as packs_common, baba from players where id=$1`, [A])
 const compra = (await como(A, `select public.comprar_pacote('comum', null) as r`)).r
 checar('compra debita o preco', Number(compra.preco) === 120, `${compra.preco}`)
 checar('compra credita o pacote',
-  (await um(`select packs_common from players where id=$1`, [A])).packs_common === antesPac.packs_common + 1)
+  Number((await um(`select private.tem_pacotes($1,'comum') as n`, [A])).n)
+    === Number(antesPac.packs_common) + 1)
 checar('o saldo caiu certinho', compra.saldo === antesPac.baba - 120, `${compra.saldo}`)
 
 const dirigido = (await como(A, `select public.comprar_pacote('comum', 1) as r`)).r

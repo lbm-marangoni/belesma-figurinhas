@@ -47,22 +47,41 @@ export default function Abrir() {
     const { data, error } = await supabase.rpc('claim_daily')
     if (error) return setAvisoDiario(error.message)
     const d = data as any
+    // quais pacotes o diario da saiu do codigo e virou coluna da definicao,
+    // entao a mensagem se monta do que o servidor respondeu
+    const lista = (d.pacotes ?? [])
+      .map((p: any) => `+${p.quantidade} ${p.nome}`).join(', ')
     setAvisoDiario(
-      `+${d.comuns} comum, +${d.raros} raro${d.ultra ? ', +1 ULTRA' : ''} · ` +
-      `+${d.baba} baba (streak ${d.streak})` +
-      (d.ultra ? '' : ` · ultra em ${d.proximo_ultra_em} resgate(s)`))
+      `${lista || 'nada hoje'} · +${d.baba} baba (streak ${d.streak})`)
     await recarregar()
   }
 
-  const pilhas: [TipoPacote, string, number, number][] = [
-    ['comum', 'Comum', jogador.packs_common, jogador.packs_common_daily],
-    ['raro', 'Raro', jogador.packs_rare, jogador.packs_rare_daily],
-    ['ultra', 'Ultra', jogador.packs_ultra, jogador.packs_ultra_daily],
-  ]
+  /**
+   * O que da para abrir agora, uma pilha por definicao.
+   *
+   * A lista nao esta mais escrita aqui: ela vem do inventario, que vem das
+   * definicoes. Criar um pacote novo no painel faz ele aparecer nesta tela
+   * sem tocar em uma linha de codigo - que era o ponto de tirar comum, raro
+   * e ultra de dentro do programa.
+   */
+  const pilhas = (() => {
+    const m = new Map<number, { def: number; nome: string; arte: string | null;
+                                comprados: number; diarios: number }>()
+    for (const it of jogador.inventario ?? []) {
+      if (!it.ativo) continue
+      const e = m.get(it.pack_definition_id)
+        ?? { def: it.pack_definition_id, nome: it.nome, arte: it.art_path,
+             comprados: 0, diarios: 0 }
+      if (it.do_diario) e.diarios += it.quantidade
+      else e.comprados += it.quantidade
+      m.set(it.pack_definition_id, e)
+    }
+    return [...m.values()].filter((p) => p.comprados + p.diarios > 0)
+  })()
 
-  async function abrir(tipo: TipoPacote) {
+  async function abrir(def: number) {
     setErro(null); setOcupado(true); setRes(null); setEmFoco(null)
-    const { data, error } = await supabase.rpc('open_pack', { pack_type: tipo })
+    const { data, error } = await supabase.rpc('open_pack', { p_pack_definition_id: def })
     setOcupado(false)
     if (error) return setErro(error.message)
     setRes(data as ResultadoPacote)
@@ -103,23 +122,29 @@ export default function Abrir() {
 
       {!animando && (
         <div className="flex flex-wrap gap-3">
-          {pilhas.map(([tipo, rotulo, n, nd]) => (
+          {pilhas.map((p) => (
             <button
-              key={tipo}
-              disabled={ocupado || n + nd === 0}
-              onClick={() => abrir(tipo)}
+              key={p.def}
+              disabled={ocupado}
+              onClick={() => abrir(p.def)}
               className="flex w-36 flex-col items-center gap-2 rounded-lg border border-neutral-700
                          bg-neutral-900 p-3 transition-colors hover:border-neutral-500
                          disabled:opacity-40 disabled:hover:border-neutral-700"
             >
-              <img src={`${import.meta.env.BASE_URL}packs/booster-${tipo}.png`} alt=""
-                   className="h-28 object-contain" />
-              <span className="text-sm font-medium">{rotulo}</span>
+              <img src={`${import.meta.env.BASE_URL}${p.arte ?? 'packs/booster-comum.png'}`}
+                   alt="" className="h-28 object-contain" />
+              <span className="text-sm font-medium">{p.nome}</span>
               <span className="text-xs text-neutral-400">
-                {n + nd} {nd > 0 && <span className="text-emerald-400">({nd} do diário)</span>}
+                {p.comprados + p.diarios}
+                {p.diarios > 0 && <span className="text-emerald-400"> ({p.diarios} do diário)</span>}
               </span>
             </button>
           ))}
+          {pilhas.length === 0 && (
+            <p className="text-sm text-neutral-500">
+              Nenhum pacote para abrir. Resgate o diário ou compre na Loja.
+            </p>
+          )}
         </div>
       )}
 
@@ -128,7 +153,7 @@ export default function Abrir() {
       {/* o pacote 3D some sozinho ao terminar; as cartas já estão gravadas */}
       {res && animando && (
         <Pacote3D
-          tipo={res.pack_type}
+          tipo={(res.pack_type ?? 'comum') as TipoPacote}
           cartas={res.cartas}
           quente={res.quente}
           aoTerminar={() => setAnimando(false)}

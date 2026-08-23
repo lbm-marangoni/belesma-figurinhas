@@ -102,7 +102,7 @@ await db.exec(`update card_copies set owner_id = '${A}', claimed_at = now(),
 checar('primeira copia de um tipo virgem AINDA e estreia mundial', (await eEstreia(c3.id)) === true)
 
 // o caminho real: abrir pacotes ate repetir e conferir o que open_pack devolve
-await db.exec(`update players set packs_common = 40 where id = '${A}';`)
+await db.query(`select private.definir_pacotes($1,'comum',false,40)`, [A])
 const vistos = new Set()
 let repetidasComEstreia = 0, repetidas = 0
 for (let i = 0; i < 40; i++) {
@@ -201,8 +201,9 @@ const ordem = Object.fromEntries((await tudo(`select slug, tier_order from tiers
 // ================================================================ reset
 console.log('\n== recomecar do zero ==')
 // deixa o mundo bem sujo antes
-await db.exec(`update players set baba = 900, packs_common = 3, pity_counter = 7,
+await db.exec(`update players set baba = 900, pity_counter = 7,
   dailies_claimed = 4, last_daily_at = now() where id = '${A}';`)
+await db.query(`select private.definir_pacotes($1,'comum',false,3)`, [A])
 await db.exec(`update card_copies set damage_level = 2 where owner_id = '${A}';`)
 const sujo = await um(`select
   (select count(*) from card_copies where owner_id is not null) as com_dono,
@@ -237,10 +238,13 @@ const dep = await um(`select
   (select sum(baba) from players)                                           as baba,
   (select sum(pity_counter + dailies_claimed) from players)                 as contadores,
   (select count(*) from players where last_daily_at is not null)            as com_daily,
-  (select sum(packs_common) from players)                                   as comuns,
-  (select sum(packs_rare) from players)                                     as raros,
-  (select sum(packs_ultra) from players)                                    as ultras,
-  (select sum(packs_common_daily + packs_rare_daily + packs_ultra_daily) from players) as diarios,
+  (select coalesce(sum(pp.quantidade),0) from player_packs pp join pack_definitions d
+     on d.id=pp.pack_definition_id where d.slug='comum' and not pp.do_diario)   as comuns,
+  (select coalesce(sum(pp.quantidade),0) from player_packs pp join pack_definitions d
+     on d.id=pp.pack_definition_id where d.slug='raro'  and not pp.do_diario)   as raros,
+  (select coalesce(sum(pp.quantidade),0) from player_packs pp join pack_definitions d
+     on d.id=pp.pack_definition_id where d.slug='ultra' and not pp.do_diario)   as ultras,
+  (select coalesce(sum(quantidade),0) from player_packs where do_diario)        as diarios,
   (select count(*) from players)                                            as jogadores,
   (select count(*) from card_copies)                                        as total_copias,
   (select count(*) from card_copies where seal <> 'none')                   as selos`)

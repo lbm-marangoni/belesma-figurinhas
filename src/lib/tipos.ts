@@ -6,11 +6,41 @@ export type Selo = 'none' | 'branco' | 'preto' | 'rosa'
 export type Origem = 'pull' | 'forge'
 export type TipoPacote = 'comum' | 'raro' | 'ultra'
 
+/** Uma pilha de pacotes na mao do jogador. `do_diario` separa o que veio do
+ *  diario (sorteia da prateleira reservada) do que foi comprado ou ganho. */
+export type ItemInventario = {
+  pack_definition_id: number
+  slug: string
+  nome: string
+  art_path: string | null
+  do_diario: boolean
+  quantidade: number
+  tamanho: number
+  ativo: boolean
+}
+
+/** Uma definicao de pacote, do catalogo publico. */
+export type DefinicaoPacote = {
+  id: number
+  slug: string
+  name: string
+  descricao: string | null
+  art_path: string | null
+  tamanho: number
+  distribuicao: 'loja' | 'admin' | 'missao' | 'diario' | 'allotment'
+  elegivel_loja: boolean
+  preco_baba: number | null
+  limite_global: number | null
+  aberturas_realizadas: number
+  ativo: boolean
+}
+
 export type Jogador = {
   id: string
   nickname: string
-  packs_common: number; packs_rare: number; packs_ultra: number
-  packs_common_daily: number; packs_rare_daily: number; packs_ultra_daily: number
+  /** o que o jogador tem para abrir, uma linha por definicao de pacote */
+  inventario: ItemInventario[]
+  pacotes_total: number
   baba: number
   is_admin: boolean
   pity_counter: number

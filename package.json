@@ -16,6 +16,7 @@
     "verificar:fase2": "node scripts/verificar-fase2.mjs",
     "verificar:fase5": "node scripts/verificar-fase5.mjs",
     "verificar:fase6": "node scripts/verificar-fase6.mjs",
+    "verificar:pacotes": "node scripts/verificar-pacotes.mjs",
     "verificar:estatico": "node scripts/verificar-estatico.mjs",
     "verificar:safeupdate": "node scripts/verificar-safeupdate.mjs",
     "auditar:producao": "node scripts/auditoria-producao.mjs",

@@ -55,9 +55,15 @@ if (eUp) { console.log('\nFALHA CRITICA: o Auth rejeita o dominio sintetico.'); 
 
 const { data: pl, error: eNick } = await c.rpc('claim_nickname', { p_nickname: NICK })
 checar('claim_nickname cria o jogador', !eNick, eNick?.message)
+// o inventario deixou de ser coluna de players e virou player_packs, entao
+// o allotment se le pelo me(), que devolve o inventario junto
+const inv = (m, slug) => Number((m?.inventario ?? [])
+  .filter((x) => x.slug === slug && !x.do_diario)
+  .reduce((a, x) => a + x.quantidade, 0))
+const { data: me0 } = await c.rpc('me')
 checar('allotment inicial 12/5/2',
-  pl?.packs_common === 12 && pl?.packs_rare === 5 && pl?.packs_ultra === 2,
-  `${pl?.packs_common}/${pl?.packs_rare}/${pl?.packs_ultra}`)
+  inv(me0, 'comum') === 12 && inv(me0, 'raro') === 5 && inv(me0, 'ultra') === 2,
+  `${inv(me0, 'comum')}/${inv(me0, 'raro')}/${inv(me0, 'ultra')}`)
 checar('nao nasce admin', pl?.is_admin === false)
 
 const { data: dep } = await c.rpc('nickname_disponivel', { p_nickname: NICK })
@@ -103,12 +109,15 @@ checar('reveal_index veio embaralhado do servidor',
 }
 
 const { data: me1 } = await c.rpc('me')
-checar('consumiu um pacote comum', me1.packs_common === 11, `${me1.packs_common}`)
+checar('consumiu um pacote comum', inv(me1, 'comum') === 11, `${inv(me1, 'comum')}`)
 
 // sem pacote suficiente, falha limpo
 for (let i = 0; i < 11; i++) await c.rpc('open_pack', { pack_type: 'comum' })
 const { error: eSem } = await c.rpc('open_pack', { pack_type: 'comum' })
-checar('sem pacote, erro claro', !!eSem && /sem pacote/.test(eSem.message), eSem?.message)
+// a mensagem passou a nomear o pacote em vez de dizer "sem pacote comum":
+// com pacote virando dado, o nome vem da definicao
+checar('sem pacote, erro claro',
+  !!eSem && /voce nao tem nenhum/.test(eSem.message), eSem?.message)
 
 // ================================================================ colecao
 console.log('\n== colecao ==')

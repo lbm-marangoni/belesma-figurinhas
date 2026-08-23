@@ -173,10 +173,15 @@ checar('selos 36 / 12 / 3',
   Number(m.branco) === 36 && Number(m.preto) === 12 && Number(m.rosa) === 3,
   `${m.branco}/${m.preto}/${m.rosa}`)
 // A flag continua na copia mesmo depois de entregue, para que ela volte a
-// reserva se for vendida. Entao o que se cobra e a reserva DISPONIVEL: e ela
-// que o diario consome, e e ela que o claim_daily repoe.
-checar('reserva diaria disponivel em 1500', Number(m.reserva) === 1500,
-  `${m.reserva} disponiveis de ${m.reserva_marcada} marcadas`)
+// reserva se for vendida. O que se cobra e a reserva DISPONIVEL - e ela que o
+// diario consome.
+//
+// Exigir exatamente 1500 e errado: entre uma abertura e o proximo
+// claim_daily a prateleira fica legitimamente abaixo do alvo, e o
+// claim_daily a devolve. O que importa e nao estar drenando.
+const alvo = 1500
+checar('reserva diaria saudavel (nao esta drenando)', Number(m.reserva) >= alvo * 0.8,
+  `${m.reserva} de ${alvo} disponiveis, ${m.reserva_marcada} marcadas`)
 checar('toda tabela de pack_config soma 100',
   m.pack_config_fora_de_100.length === 0, String(m.pack_config_fora_de_100))
 console.log(`   ${m.jogadores} jogadores · ${m.com_dono} copias em maos · ` +

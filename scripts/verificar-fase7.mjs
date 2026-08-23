@@ -55,15 +55,24 @@ await como(B, `select public.claim_nickname('bob')`)
 
 // ================================================================ diario
 console.log('\n== diario (spec §8) ==')
+// claim_daily agora devolve uma LISTA de pacotes, porque quais pacotes o
+// diario entrega saiu do codigo e virou coluna de pack_definitions.
+const doDia = (r, slug) =>
+  Number((r.pacotes ?? []).find((x) => x.slug === slug)?.quantidade ?? 0)
+
 const d1 = (await como(A, `select public.claim_daily() as r`)).r
-checar('credita 2 comuns e 1 raro', d1.comuns === 2 && d1.raros === 1, `${d1.comuns}/${d1.raros}`)
-checar('o primeiro resgate nao traz ultra', d1.ultra === false)
+checar('credita 2 comuns e 1 raro', doDia(d1,'comum') === 2 && doDia(d1,'raro') === 1,
+  `${doDia(d1,'comum')}/${doDia(d1,'raro')}`)
+checar('o primeiro resgate nao traz ultra', doDia(d1,'ultra') === 0)
 checar('streak comeca em 1', d1.streak === 1, `${d1.streak}`)
 
-const p1 = await um(`select packs_common_daily, packs_rare_daily, packs_ultra_daily, baba,
+const p1 = await um(`select private.tem_pacotes(id,'comum',true) as packs_common_daily,
+       private.tem_pacotes(id,'raro',true)  as packs_rare_daily,
+       private.tem_pacotes(id,'ultra',true) as packs_ultra_daily, baba,
                             dailies_claimed from players where id=$1`, [A])
 checar('os pacotes caem nos contadores do DIARIO, nao no allotment',
-  p1.packs_common_daily === 2 && p1.packs_rare_daily === 1 && p1.packs_ultra_daily === 0)
+  Number(p1.packs_common_daily) === 2 && Number(p1.packs_rare_daily) === 1
+  && Number(p1.packs_ultra_daily) === 0)
 checar('login diario paga 30 baba', p1.baba === 30, `${p1.baba}`)
 
 await deveFalhar('nao resgata duas vezes em 24h', A, `select public.claim_daily()`)
@@ -71,14 +80,14 @@ await deveFalhar('nao resgata duas vezes em 24h', A, `select public.claim_daily(
 // segundo e terceiro resgate: o ultra sai no terceiro
 await db.exec(`update players set last_daily_at = now() - interval '25 hours' where id='${A}';`)
 const d2 = (await como(A, `select public.claim_daily() as r`)).r
-checar('segundo resgate ainda sem ultra', d2.ultra === false)
+checar('segundo resgate ainda sem ultra', doDia(d2,'ultra') === 0)
 checar('streak avanca', d2.streak === 2, `${d2.streak}`)
 
 await db.exec(`update players set last_daily_at = now() - interval '25 hours' where id='${A}';`)
 const d3 = (await como(A, `select public.claim_daily() as r`)).r
-checar('o TERCEIRO resgate traz o ultra', d3.ultra === true)
+checar('o TERCEIRO resgate traz o ultra', doDia(d3,'ultra') === 1)
 checar('o ultra caiu no contador do diario',
-  (await um(`select packs_ultra_daily from players where id=$1`, [A])).packs_ultra_daily === 1)
+  Number((await um(`select private.tem_pacotes($1,'ultra',true) as n`, [A])).n) === 1)
 
 // streak de 7 paga o extra
 for (let i = 4; i <= 7; i++) {

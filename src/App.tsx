@@ -114,8 +114,9 @@ function Shell() {
 
   if (!jogador) return null
 
-  const pacotes = jogador.packs_common + jogador.packs_rare + jogador.packs_ultra +
-    jogador.packs_common_daily + jogador.packs_rare_daily + jogador.packs_ultra_daily
+  // o total vem pronto do me(): o inventario agora e uma tabela, e somar
+  // seis colunas fixas deixou de fazer sentido quando o quarto pacote existe
+  const pacotes = jogador.pacotes_total ?? 0
 
   const aba = ({ isActive }: { isActive: boolean }) => `aba ${isActive ? 'aba-ativa' : ''}`
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useSessao } from '../lib/sessao'
+import AdminPacotes from './AdminPacotes'
 
 /**
  * Painel administrativo (spec §18).
@@ -10,7 +11,8 @@ import { useSessao } from '../lib/sessao'
  * nada: toda chamada abaixo volta "nao autorizado" para quem não é is_admin.
  */
 
-const ABAS = ['Saúde', 'Jogadores', 'Odds', 'Estoque', 'Sorteio', 'Conteúdo', 'Zona de perigo', 'Log'] as const
+const ABAS = ['Saúde', 'Jogadores', 'Pacotes', 'Odds', 'Estoque', 'Sorteio',
+              'Conteúdo', 'Zona de perigo', 'Log'] as const
 type Aba = (typeof ABAS)[number]
 
 export default function Admin() {
@@ -45,6 +47,7 @@ export default function Admin() {
       </nav>
       {aba === 'Saúde' && <Saude />}
       {aba === 'Jogadores' && <Jogadores />}
+      {aba === 'Pacotes' && <AdminPacotes />}
       {aba === 'Sorteio' && <Sorteio />}
       {aba === 'Odds' && <Odds />}
       {aba === 'Estoque' && <Estoque />}

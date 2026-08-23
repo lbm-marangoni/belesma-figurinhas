@@ -67,12 +67,15 @@ console.log('\n== claim_nickname (secao 10) ==')
 const ana = await como(UID.ana, `select * from public.claim_nickname('ana')`)
 checar('cria o jogador', ana.claim_nickname !== null)
 const perfil = await um(`select * from public.players where id = $1`, [UID.ana])
+const alot = await um(`select private.tem_pacotes($1,'comum') as comuns,
+                              private.tem_pacotes($1,'raro')  as raros,
+                              private.tem_pacotes($1,'ultra') as ultras`, [UID.ana])
 checar('allotment inicial 12/5/2',
-  perfil.packs_common === 12 && perfil.packs_rare === 5 && perfil.packs_ultra === 2,
-  `${perfil.packs_common}/${perfil.packs_rare}/${perfil.packs_ultra}`)
+  Number(alot.comuns) === 12 && Number(alot.raros) === 5 && Number(alot.ultras) === 2,
+  `${alot.comuns}/${alot.raros}/${alot.ultras}`)
 
 await como(UID.ana, `select * from public.claim_nickname('ana')`)
-const depois = await um(`select packs_common from public.players where id = $1`, [UID.ana])
+const depois = await um(`select private.tem_pacotes($1,'comum') as packs_common`, [UID.ana])
 checar('idempotente: nao dobra o allotment', depois.packs_common === 12, `${depois.packs_common}`)
 
 await deveFalhar('recusa apelido que nao bate com a conta', UID.bob,
@@ -99,7 +102,7 @@ checar('todas as copias ficaram com o dono', Number(donas.n) === r1.cartas.lengt
 const aud = await um(`select count(*) as n from pack_opening_cards where opening_id = $1`, [r1.abertura])
 checar('auditoria gravada', Number(aud.n) === r1.cartas.length)
 checar('consumiu um pacote comum',
-  (await um(`select packs_common from players where id = $1`, [UID.ana])).packs_common === 11)
+  Number((await um(`select private.tem_pacotes($1,'comum') as n`, [UID.ana])).n) === 11)
 
 // ================================================================ em volume
 console.log('\n== open_pack: 450 pacotes ==')
@@ -235,7 +238,7 @@ checar('pity zerou o contador',
 
 // ================================================================ reserva
 console.log('\n== reserva do diario ==')
-await db.exec(`update players set packs_common_daily = 1 where id = '${UID.bob}';`)
+await db.query(`select private.definir_pacotes($1,'comum',true,1)`, [UID.bob])
 const rd = (await como(UID.bob, `select public.open_pack('comum') as r`)).r
 checar('pacote do diario marcado como tal', rd.do_diario === true)
 const base = rd.cartas.filter((c) => !c.from_hit_table)

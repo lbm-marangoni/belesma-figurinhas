@@ -84,8 +84,10 @@ for (const tipo of ['comum', 'raro', 'ultra']) {
   await repor()
   const LOTE = await lote(tipo)
   console.log(`   (repondo estoque a cada ${LOTE} pacotes de ${tipo})`)
-  await db.exec(`update players set packs_common = ${N}, packs_rare = ${N}, packs_ultra = ${N},
-                                    pity_counter = 0 where id = '${U}';`)
+  for (const t of ['comum', 'raro', 'ultra']) {
+    await db.query(`select private.definir_pacotes($1,$2,false,$3)`, [U, t, N])
+  }
+  await db.exec(`update players set pity_counter = 0 where id = '${U}';`)
 
   const hitNatural = {}, base = {}
   let quentes = 0, bonus = 0, promovidos = 0, slotsBase = 0, cartas = 0, pity = 0
@@ -200,7 +202,8 @@ await repor()
 await db.exec(`
   update card_copies set owner_id = '${U}', claimed_at = now()
   where card_type_id in (select id from card_types where tier_order >= 6);
-  update players set packs_ultra = 400, pity_counter = 0 where id = '${U}';`)
+  update players set pity_counter = 0 where id = '${U}';`)
+await db.query(`select private.definir_pacotes($1,'ultra',false,400)`, [U])
 
 let secoQuebrou = 0, secoCurto = 0, secoOk = 0, secoEstourou = 0, secoVazio = 0
 for (let i = 0; i < 400; i++) {

@@ -251,7 +251,7 @@ await deveFalhar('player: creditar baba para si',
 await deveFalhar('player: virar admin',
   `update public.players set is_admin = true where id = '${jogador}';`)
 await deveFalhar('player: alterar allotment',
-  `update public.players set packs_ultra = 999 where id = '${jogador}';`)
+  `update public.players set baba = 999999 where id = '${jogador}';`)
 await deveFalhar('player: mexer nas odds',
   `update public.pack_config set weight = 100 where pack_type = 'comum' and tier = 'prisma';`)
 await deveFalhar('player: mexer nos precos',
@@ -291,7 +291,7 @@ await devePassar('anon: ler card_copies (indice global publico)',
 await devePassar('anon: ler o catalogo',
   `select count(*) from public.card_types, public.characters, public.tiers;`, 'anon')
 await devePassar('player: ler o proprio saldo por me()',
-  `select baba from public.me();`)
+  `select (public.me())->>'baba' as baba;`)
 await devePassar('anon: select * em players_public (sem armadilha)',
   `select * from public.players_public;`, 'anon')
 await devePassar('anon: ler seal_audit (auditoria publica)',
