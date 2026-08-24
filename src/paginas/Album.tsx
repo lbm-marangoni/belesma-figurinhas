@@ -69,6 +69,16 @@ export default function Album() {
 
   const [indice, setIndice] = useState(0)
   const [virando, setVirando] = useState<'' | 'frente' | 'tras'>('')
+  const livro = useRef<HTMLDivElement>(null)
+  /**
+   * Altura travada durante a virada.
+   *
+   * Paginas de tiers diferentes tem alturas diferentes (uma skin ou quatro),
+   * e a folha girando mostra o DESTINO enquanto o livro ainda tem a altura
+   * da ATUAL. O livro pulava de tamanho no meio da animacao - e isso, mais
+   * do que a animacao em si, e o que fazia a virada parecer quebrada.
+   */
+  const [alturaTravada, setAlturaTravada] = useState<number | null>(null)
   const alvoPag = useRef(0)
   const [emFoco, setEmFoco] = useState<Carta | null>(null)
 
@@ -283,7 +293,9 @@ export default function Album() {
   // renderizações e quebraria a ordem dos hooks.
   useEffect(() => {
     if (!virando) return
-    const t = setTimeout(() => { setIndice(alvoPag.current); setVirando('') }, 1200)
+    const t = setTimeout(() => {
+      setIndice(alvoPag.current); setVirando(''); setAlturaTravada(null)
+    }, 1200)
     return () => clearTimeout(t)
   }, [virando])
 
@@ -303,9 +315,11 @@ export default function Album() {
     if (destino < 0 || destino >= spreads.length) return
     alvoPag.current = destino
     if (semAnimacao) { setIndice(destino); return }
+    // mede ANTES de trocar o conteudo: depois o valor ja seria o do destino
+    setAlturaTravada(livro.current?.offsetHeight ?? null)
     setVirando(d > 0 ? 'frente' : 'tras')
   }
-  const aoFim = () => { setIndice(alvoPag.current); setVirando('') }
+  const aoFim = () => { setIndice(alvoPag.current); setVirando(''); setAlturaTravada(null) }
 
   const atual = spreads[indice]
   const destino = spreads[alvoPag.current] ?? atual
@@ -340,7 +354,7 @@ export default function Album() {
 
   return (
     <div className="p-3 sm:p-5">
-      <div className="mx-auto mb-3 flex max-w-[60rem] items-center justify-between text-sm">
+      <div className="mx-auto mb-3 flex w-[min(100rem,96vw)] items-center justify-between text-sm">
         <span className="text-neutral-400">
           <strong className="text-neutral-100">{total.coladas}</strong> coladas ·{' '}
           {total.tenho} no acervo · {total.de} no álbum
@@ -354,7 +368,8 @@ export default function Album() {
       </div>
 
       <div className="mesa">
-        <div className={`livro tema-${atual.tier}`}>
+        <div ref={livro} className={`livro tema-${atual.tier}`}
+             style={alturaTravada ? { height: alturaTravada } : undefined}>
           {/* esquerda: no avanço já mostra a de destino sendo revelada */}
           <Pagina spread={virando === 'frente' ? destino : atual} lado="esq"
                   umaPagina={estreito} {...props} />
@@ -380,7 +395,7 @@ export default function Album() {
         </div>
       </div>
 
-      <div className="mx-auto mt-4 flex max-w-[60rem] items-center justify-center gap-4 text-sm">
+      <div className="mx-auto mt-4 flex w-[min(100rem,96vw)] items-center justify-center gap-4 text-sm">
         <button onClick={() => virar(-1)} disabled={indice === 0 || !!virando}
           className="rounded border border-neutral-700 px-4 py-1 text-neutral-300 disabled:opacity-30">
           ←

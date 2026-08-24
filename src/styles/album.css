@@ -38,7 +38,12 @@
   position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  max-width: 60rem;
+  /* Era 60rem fixo, de quando cada skin tinha 3 slots. Com seis Belesmas a
+     fileira e o dobro de larga, e 60rem deixava o livro estreito e alto -
+     mais rolagem vertical do que album. Acompanha a tela, com teto para nao
+     virar uma faixa numa ultrawide. */
+  width: min(100rem, 96vw);
+  max-width: 100rem;
   margin-inline: auto;
   transform-style: preserve-3d;
   border-radius: 6px;
@@ -160,11 +165,21 @@
 
 /* ================================================================ slots */
 /* Uma coluna por personagem, vinda do dado (--colunas). Estava `repeat(3)`
-   fixo, e com seis Belesmas cada skin quebrava em duas fileiras. */
+   fixo, e com seis Belesmas cada skin quebrava em duas fileiras.
+   `align-items: start` mantem todo item do mesmo tamanho: sem isso o item
+   estica ate a altura da linha e a figurinha, que e quadrada por
+   aspect-ratio, fica com a legenda deslocada em relacao as vizinhas. */
 .grade-slots {
   display: grid;
   grid-template-columns: repeat(var(--colunas, 3), 1fr);
+  align-items: start;
   gap: .85rem 1rem;
+}
+/* a legenda tem altura fixa: nome curto e nome longo nao podem mudar a
+   altura do item, senao a fileira inteira desalinha */
+.grade-slots p:not(.linha-skin) {
+  height: 1.1rem;
+  line-height: 1.1rem;
 }
 .linha-skin {
   grid-column: 1 / -1;

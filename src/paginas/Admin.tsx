@@ -194,9 +194,6 @@ function Sorteio() {
 function Jogadores() {
   const [lista, setLista] = useState<any[]>([])
   const { rodar, Aviso } = useAviso()
-  const [alvo, setAlvo] = useState('todos')
-  const [tipo, setTipo] = useState('comum')
-  const [qtd, setQtd] = useState(10)
   const [senhaAlvo, setSenhaAlvo] = useState('')
   const [senhaNova, setSenhaNova] = useState('')
   const [babaAlvo, setBabaAlvo] = useState('todos')
@@ -253,24 +250,15 @@ function Jogadores() {
         </tbody>
       </table>
 
-      <section>
-        <h3 className="mb-2 text-sm font-medium">Dar pacotes</h3>
-        <div className="flex flex-wrap items-center gap-2">
-          <select value={alvo} onChange={(e) => setAlvo(e.target.value)} className={campo}>
-            <option value="todos">todos</option>
-            {lista.map((p) => <option key={p.id} value={p.nickname}>{p.nickname}</option>)}
-          </select>
-          <select value={tipo} onChange={(e) => setTipo(e.target.value)} className={campo}>
-            <option value="comum">comum</option><option value="raro">raro</option><option value="ultra">ultra</option>
-          </select>
-          <input type="number" value={qtd} onChange={(e) => setQtd(+e.target.value)} className={`${campo} w-20`} />
-          <button className={botao} onClick={async () => {
-            if (await rodar(() => supabase.rpc('grant_packs',
-              { p_target: alvo, p_pack_type: tipo, p_quantidade: qtd }),
-              (n) => `${qtd} pacote(s) ${tipo} para ${n} jogador(es)`)) carregar()
-          }}>dar</button>
-        </div>
-      </section>
+      {/* "Dar pacotes" saiu daqui. Ele tinha um select fixo com comum, raro e
+          ultra, e desde que pacote virou dado essa lista nasce desatualizada
+          a cada definicao nova - ja estava sem os seis boosters de
+          personagem. Entregar pacote agora e na aba Pacotes, onde a lista
+          vem do catalogo e da para escolher se cai como pacote do diario. */}
+      <p className="rounded border border-neutral-800 p-2 text-xs text-neutral-500">
+        Para entregar pacote, use a aba <strong className="text-neutral-300">Pacotes</strong>:
+        a lista sai do catálogo e inclui os boosters de personagem.
+      </p>
 
       <section>
         <h3 className="mb-2 text-sm font-medium">Dar ou tirar baba</h3>
