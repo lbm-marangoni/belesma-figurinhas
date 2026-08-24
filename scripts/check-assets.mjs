@@ -1,7 +1,9 @@
 // Confere os assets contra o catalogo (spec secao 3).
 //
-// A lista de personagens e skins sai do proprio seed SQL - a mesma fonte de
-// onde card_types e gerado - entao rodar isto nao exige banco no ar.
+// A lista de skins sai do seed SQL e a de personagens sai de TODAS as
+// migracoes - personagem novo entra por migracao propria, nao pelo seed, e
+// ler so o seed fazia a checagem ignorar os que chegaram depois.
+// Nada disso exige banco no ar.
 //
 // Verifica:
 //   - todo <personagem>/<skin>.jpg existe, com a extensao certa
@@ -26,8 +28,17 @@ const bloco = (marcador) => {
   return seed.slice(i, seed.indexOf(';', i))
 }
 
-const personagens = [...bloco('insert into public.characters').matchAll(/\(\s*\d+,\s*'([a-z0-9-]+)'/g)]
-  .map((m) => m[1])
+const migracoes = join(raiz, 'supabase', 'migrations')
+const todoSql = readdirSync(migracoes).filter((f) => f.endsWith('.sql')).sort()
+  .map((f) => readFileSync(join(migracoes, f), 'utf8')).join(String.fromCharCode(10))
+const personagens = [...new Set([
+  // do seed: (1, 'pedrao', 'Belesma do Pedrao', ...)
+  ...[...bloco('insert into public.characters').matchAll(/\(\s*\d+,\s*'([a-z0-9-]+)'/g)]
+    .map((m) => m[1]),
+  // das migracoes posteriores: ('biscoito', 'Belesma do Biscoito', 4, ...)
+  ...[...todoSql.matchAll(/\(\s*'([a-z][a-z0-9-]{2,19})',\s*'Belesma[^']*',\s*\d+/g)]
+    .map((m) => m[1]),
+])].sort()
 const skins = [...bloco('insert into public.skins').matchAll(/\(\s*'([a-z0-9-]+)'\s*,\s*'[a-z]+'\s*,/g)]
   .map((m) => m[1])
 
@@ -48,13 +59,25 @@ for (const p of personagens) {
     problemas += skins.length
     continue
   }
-  const presentes = readdirSync(dir)
+  // a pasta p/ e a versao de 512 usada nas miniaturas, nao um arquivo solto
+  const presentes = readdirSync(dir).filter((f) => f !== 'p')
   for (const s of skins) if (!presentes.includes(`${s}.jpg`)) faltando.push(s)
 
   console.log(`${p}: ${skins.length - faltando.length}/${skins.length} presentes`)
   if (faltando.length) {
     console.log(`  faltam: ${faltando.join(' ')}`)
     problemas += faltando.length
+  }
+
+  // toda arte precisa da miniatura correspondente: sem ela o album mostra
+  // quadrado vazio, porque a Figurinha pede p/<skin>.jpg
+  const dirP = join(dir, 'p')
+  const semMini = existsSync(dirP)
+    ? skins.filter((sk) => !readdirSync(dirP).includes(`${sk}.jpg`))
+    : skins
+  if (semMini.length) {
+    console.log(`  faltam miniaturas em p/: ${semMini.join(' ')}`)
+    problemas += semMini.length
   }
 
   for (const f of presentes) {
