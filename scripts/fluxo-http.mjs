@@ -133,9 +133,10 @@ checar('acervo tem as cartas abertas', (acervo?.length ?? 0) >= 40, `${acervo?.l
 // contagem total de card_copies cresce alem disso de proposito.
 const { count: puxadas } = await c.from('card_copies')
   .select('id', { count: 'exact', head: true }).eq('origin', 'pull')
-checar('a tiragem puxavel segue em 6642', puxadas === 6642, `${puxadas}`)
+const { count: nch } = await c.from('characters').select('id', { count: 'exact', head: true })
+checar(`a tiragem puxavel segue em ${nch * 2214}`, puxadas === nch * 2214, `${puxadas}`)
 const { count: total } = await c.from('card_copies').select('id', { count: 'exact', head: true })
-checar('indice global continua publico', (total ?? 0) >= 6642, `${total} linhas`)
+checar('indice global continua publico', (total ?? 0) >= nch * 2214, `${total} linhas`)
 
 // ================================================================ admin
 console.log('\n== /admin so para admin ==')
@@ -164,8 +165,10 @@ checar('me() ja reflete is_admin', meAdmin.is_admin === true)
 const { data: js, error: eJs } = await c.rpc('admin_jogadores')
 checar('admin: admin_jogadores funciona', !eJs && Array.isArray(js), eJs?.message)
 const { data: est } = await c.rpc('admin_stock_report')
+// 17 selos por personagem: 12 brancos, 4 pretos, 1 rosa (spec §6)
 checar('admin: estoque bate com o seed',
-  est.selos.emitidos === 51 && est.selos.branco === 36, `${est.selos.emitidos} selos`)
+  est.selos.emitidos === nch * 17 && est.selos.branco === nch * 12,
+  `${est.selos.emitidos} selos para ${nch} personagens`)
 const { error: eOdds } = await c.rpc('admin_set_pack_config', {
   p_rows: [{ pack_type: 'comum', slot: 'hit', tier: 'rara', weight: 50 }],
 })
@@ -179,7 +182,7 @@ const { data: seco } = await c.rpc('seed_edition_dry_run', { p_params: { slug: '
 checar('dry-run preve 27 tipos e 2214 copias',
   Number(seco.card_types) === 27 && Number(seco.card_copies) === 2214)
 const { count: chars } = await c.from('characters').select('id', { count: 'exact', head: true })
-checar('dry-run nao escreveu nada', chars === 3, `${chars} personagens`)
+checar('dry-run nao escreveu nada', chars === nch, `${chars} personagens`)
 
 const { data: logs } = await c.from('admin_log').select('*')
 checar('admin le o admin_log', Array.isArray(logs), `${logs?.length} linhas`)

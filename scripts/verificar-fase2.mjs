@@ -324,9 +324,13 @@ await deveFalhar('admin nao apaga a si mesmo', UID.chefe,
 
 // ---------------------------------------------------- personagem novo
 console.log('\n== seed_edition (personagem 4) ==')
+// quantos personagens ANTES do dry-run: o numero cresce a cada Belesma que
+// entra, entao comparar com 3 fixo quebrava sozinho
+const chAntes = Number((await um(`select count(*) as n from characters`)).n)
 const seco = (await como(UID.chefe, `select public.seed_edition_dry_run('{"slug":"zezao"}'::jsonb) as r`)).r
 checar('dry-run nao escreve nada',
-  Number((await um(`select count(*) as n from characters`)).n) === 3, `${seco.card_copies} previstas`)
+  Number((await um(`select count(*) as n from characters`)).n) === chAntes,
+  `${seco.card_copies} previstas`)
 checar('dry-run preve 27 tipos e 2214 copias',
   Number(seco.card_types) === 27 && Number(seco.card_copies) === 2214,
   `${seco.card_types}/${seco.card_copies}`)
@@ -334,8 +338,9 @@ const novo = (await como(UID.chefe, `select public.seed_edition('{"slug":"zezao"
 checar('criou 2214 copias', Number(novo.copias) === 2214, `${novo.copias}`)
 checar('selos do novo saem 12/4/1',
   novo.selos.branco === 12 && novo.selos.preto === 4 && novo.selos.rosa === 1)
-checar('set agora tem 8856 copias',
-  Number((await um(`select count(*) as n from card_copies where origin = 'pull'`)).n) === 8856)
+checar(`set agora tem ${(chAntes + 1) * 2214} copias`,
+  Number((await um(`select count(*) as n from card_copies where origin = 'pull'`)).n)
+    === (chAntes + 1) * 2214)
 checar('album absorveu os slots sem pagina nova',
   Number((await um(`select count(*) as n from album_pages`)).n) === 28)
 await deveFalhar('seed_edition duas vezes aborta', UID.chefe,

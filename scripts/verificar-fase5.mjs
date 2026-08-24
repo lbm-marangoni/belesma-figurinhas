@@ -183,8 +183,12 @@ checar('trocar carta da vitrine limpa o slot', vit2.showcase_1 === null, `${vit2
 // ================================================================ indice global
 console.log('\n== indice global ==')
 const gi = (await um(`select public.global_index() as g`)).g
-checar('lista os 3 personagens', gi.personagens.length === 3, `${gi.personagens.length}`)
-checar('total_personagens bate', gi.total_personagens === 3)
+checar('lista todos os personagens',
+  gi.personagens.length === Number((await um(`select count(*) as n from characters`)).n),
+  `${gi.personagens.length}`)
+checar('total_personagens bate',
+  gi.total_personagens === Number((await um(`select count(*) as n from characters`)).n),
+  `${gi.total_personagens}`)
 checar('cada personagem traz 27 tipos',
   gi.personagens.every((p) => p.tipos.length === 27),
   gi.personagens.map((p) => p.tipos.length).join('/'))

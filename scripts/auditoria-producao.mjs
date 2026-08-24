@@ -166,11 +166,16 @@ select jsonb_build_object(
   'jogadores', (select count(*) from players)
 ) as r`)
 const m = n.r
-checar('6642 copias puxadas (3 personagens x 2214)', Number(m.puxadas) === 6642, m.puxadas)
-checar('81 tipos', Number(m.tipos) === 81, m.tipos)
-checar('3 personagens no lancamento', Number(m.personagens) === 3, m.personagens)
-checar('selos 36 / 12 / 3',
-  Number(m.branco) === 36 && Number(m.preto) === 12 && Number(m.rosa) === 3,
+// Derivado do numero de personagens: cada Belesma traz 27 skins, 2214
+// copias e 12/4/1 selos. Numero fixo aqui quebrava a auditoria inteira toda
+// vez que um personagem novo entrava.
+const NCH = Number(m.personagens)
+checar(`${NCH * 2214} copias puxadas (${NCH} personagens x 2214)`,
+  Number(m.puxadas) === NCH * 2214, m.puxadas)
+checar(`${NCH * 27} tipos (27 por personagem)`, Number(m.tipos) === NCH * 27, m.tipos)
+checar('selos 12/4/1 por personagem',
+  Number(m.branco) === NCH * 12 && Number(m.preto) === NCH * 4
+  && Number(m.rosa) === NCH,
   `${m.branco}/${m.preto}/${m.rosa}`)
 // A flag continua na copia mesmo depois de entregue, para que ela volte a
 // reserva se for vendida. O que se cobra e a reserva DISPONIVEL - e ela que o
@@ -179,7 +184,7 @@ checar('selos 36 / 12 / 3',
 // Exigir exatamente 1500 e errado: entre uma abertura e o proximo
 // claim_daily a prateleira fica legitimamente abaixo do alvo, e o
 // claim_daily a devolve. O que importa e nao estar drenando.
-const alvo = 1500
+const alvo = NCH * 500
 checar('reserva diaria saudavel (nao esta drenando)', Number(m.reserva) >= alvo * 0.8,
   `${m.reserva} de ${alvo} disponiveis, ${m.reserva_marcada} marcadas`)
 checar('toda tabela de pack_config soma 100',

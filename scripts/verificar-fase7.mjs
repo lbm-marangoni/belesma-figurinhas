@@ -242,8 +242,10 @@ checar('nenhuma forjada com serial da tiragem', Number(inv.forge_torta) === 0)
 checar('nenhuma forjada com selo', Number(inv.forjada_selada) === 0)
 checar('nenhum serial acima da tiragem', Number(inv.serial_estourado) === 0)
 checar('nenhum (tipo, serial) duplicado', Number(inv.serial_duplicado) === 0)
+const NCH7 = Number((await um(`select count(*) as n from characters`)).n)
 checar('a contagem de selos NAO mudou depois de tudo isso (teste 5)',
-  Number(inv.branco) === 36 && Number(inv.preto) === 12 && Number(inv.rosa) === 3,
+  Number(inv.branco) === NCH7 * 12 && Number(inv.preto) === NCH7 * 4
+  && Number(inv.rosa) === NCH7,
   `${inv.branco}/${inv.preto}/${inv.rosa}`)
 
 console.log(`\n${falhas === 0 ? 'TUDO PASSOU' : falhas + ' FALHA(S)'}`)

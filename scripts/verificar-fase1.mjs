@@ -75,11 +75,16 @@ console.log('  card_copies .........', c.copias)
 console.log('  album_pages .........', c.paginas)
 console.log('  reserved_for_daily ..', c.reserva)
 
-checar('3 personagens', Number(c.personagens) === 3, `${c.personagens}`)
-checar('81 card_types', Number(c.tipos) === 81, `${c.tipos}`)
-checar('6642 card_copies', Number(c.copias) === 6642, `${c.copias}`)
+// Tudo aqui e por PERSONAGEM, nao numero fixo: 27 skins e 2214 copias cada.
+// Hardcodar 3/81/6642 fazia a bateria inteira falhar toda vez que um Belesma
+// novo entrava - e o que falhava era o teste, nao o jogo.
+const NCH = Number(c.personagens)
+checar(`${NCH} personagens, 27 skins cada`, NCH >= 3, `${NCH}`)
+checar('27 card_types por personagem', Number(c.tipos) === NCH * 27, `${c.tipos}`)
+checar('2214 card_copies por personagem', Number(c.copias) === NCH * 2214, `${c.copias}`)
 checar('verify_code unico em todas', Number(c.codigos) === Number(c.copias), `${c.codigos}/${c.copias}`)
-checar('reserva do diario = 1500', Number(c.reserva) === 1500, `${c.reserva}`)
+checar('reserva do diario = 500 por personagem',
+  Number(c.reserva) === NCH * 500, `${c.reserva}`)
 
 // cada personagem tem exatamente 2214
 console.log('\n== Copias por personagem ==')
@@ -115,9 +120,10 @@ const mapa = Object.fromEntries(porCor.map((r) => [r.cor, Number(r.n)]))
 console.log('  branco ...', mapa.branco ?? 0)
 console.log('  preto ....', mapa.preto ?? 0)
 console.log('  rosa .....', mapa.rosa ?? 0)
-checar('36 branco', (mapa.branco ?? 0) === 36, `${mapa.branco ?? 0}`)
-checar('12 preto', (mapa.preto ?? 0) === 12, `${mapa.preto ?? 0}`)
-checar('3 rosa', (mapa.rosa ?? 0) === 3, `${mapa.rosa ?? 0}`)
+// 12 brancos, 4 pretos e 1 rosa por personagem (spec §6)
+checar(`${NCH * 12} branco`, (mapa.branco ?? 0) === NCH * 12, `${mapa.branco ?? 0}`)
+checar(`${NCH * 4} preto`, (mapa.preto ?? 0) === NCH * 4, `${mapa.preto ?? 0}`)
+checar(`${NCH} rosa`, (mapa.rosa ?? 0) === NCH, `${mapa.rosa ?? 0}`)
 
 console.log('\n  por personagem:')
 for (const r of await tudo(`
@@ -148,7 +154,7 @@ for (const r of await tudo(`
   join card_types ct on ct.tier = t.slug
   join card_copies cc on cc.card_type_id = ct.id
   group by t.slug, t.tier_order order by t.tier_order`)) {
-  const esperado = (Number(r.total) * 51 / 6642).toFixed(2)
+  const esperado = (Number(r.total) * (NCH * 17) / (NCH * 2214)).toFixed(2)
   console.log(`    ${r.slug.padEnd(9)} ${String(r.selados).padStart(2)} selados de ${String(r.total).padStart(4)}  (esperanca ${esperado})`)
 }
 
@@ -161,7 +167,8 @@ const auditoria = await tudo(`
 for (const a of auditoria) {
   console.log(`    ${a.slug.padEnd(8)} ${a.branco}/${a.preto}/${a.rosa}  ${a.checksum}`)
 }
-checar('seal_audit tem uma linha por personagem', auditoria.length === 3, `${auditoria.length}`)
+checar('seal_audit tem uma linha por personagem', auditoria.length === NCH,
+  `${auditoria.length}`)
 checar('auditoria bate com 12/4/1 em todos',
   auditoria.every((a) => a.branco === 12 && a.preto === 4 && a.rosa === 1))
 
@@ -189,7 +196,8 @@ const contagemOutro = (await outroBanco.query(
   `select count(*) filter (where seal='branco') b, count(*) filter (where seal='preto') p,
           count(*) filter (where seal='rosa') r from card_copies`)).rows[0]
 checar('...mas continua saindo 36/12/3',
-  Number(contagemOutro.b) === 36 && Number(contagemOutro.p) === 12 && Number(contagemOutro.r) === 3,
+  Number(contagemOutro.b) === NCH * 12 && Number(contagemOutro.p) === NCH * 4
+  && Number(contagemOutro.r) === NCH,
   `${contagemOutro.b}/${contagemOutro.p}/${contagemOutro.r}`)
 await outroBanco.close()
 
@@ -374,7 +382,8 @@ checar('rodar tudo de novo nao muda selo',
 checar('rodar tudo de novo NAO re-sorteia (checksum intacto)',
   antes.h === depois.h)
 const reserva2 = await um(`select count(*) as n from card_copies where reserved_for_daily`)
-checar('rodar tudo de novo nao infla a reserva', Number(reserva2.n) === 1500, `${reserva2.n}`)
+checar('rodar tudo de novo nao infla a reserva', Number(reserva2.n) === NCH * 500,
+  `${reserva2.n}`)
 
 console.log(`\n${falhas === 0 ? 'TUDO PASSOU' : falhas + ' FALHA(S)'}`)
 await db.close()

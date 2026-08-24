@@ -24,13 +24,25 @@ const QUALIDADE = 85   // os originais vem em ~3 MB (q95+); 85 corta ~5x sem doe
 const seed = readFileSync(join(raiz, 'supabase/migrations/20260821120100_seed.sql'), 'utf8')
 const bloco = (m) => seed.slice(seed.indexOf(m), seed.indexOf(';', seed.indexOf(m)))
 const skins = [...bloco('insert into public.skins').matchAll(/\(\s*'([a-z0-9-]+)'\s*,\s*'[a-z]+'\s*,/g)].map((m) => m[1])
-const personagens = [...bloco('insert into public.characters').matchAll(/\(\s*\d+,\s*'([a-z0-9-]+)'/g)].map((m) => m[1])
+// Os personagens saem das PASTAS, nao do seed.
+//
+// Sair do seed obrigava a editar SQL antes de importar arte, e a ordem certa
+// e a inversa: a arte chega primeiro, o seed vem depois. Agora basta existir
+// uma pasta "belesma <slug>" com as 27 skins.
+const personagens = readdirSync(origem, { withFileTypes: true })
+  .filter((e) => e.isDirectory() && /^belesma /.test(e.name))
+  .map((e) => e.name.replace(/^belesma /, '').trim().toLowerCase())
+  .sort()
 
 // Os arquivos vieram com nome livre e alguns com erro de digitacao:
 //   belesma_pedrao_base -> original     pedra-noite  -> pedrao/noite
 //   pedro-ruby -> pedrao/rubi           santa-vento  -> santao/vento
 //   sapphire -> safira                  ruby         -> rubi
-const APELIDOS = { base: 'original', ruby: 'rubi', sapphire: 'safira' }
+//   infernal -> inferno                obisidana / obisidiana -> obsidiana
+const APELIDOS = {
+  base: 'original', ruby: 'rubi', sapphire: 'safira',
+  infernal: 'inferno', obisidana: 'obsidiana', obisidiana: 'obsidiana',
+}
 const alvos = [...skins, ...Object.keys(APELIDOS)]
 
 // Casa pelo SUFIXO mais longo: assim "aura-branca" ganha de "branca" e
@@ -150,6 +162,20 @@ for (const p of personagens) {
       .resize(2048, 2048, { fit: 'cover', position: 'centre' })
       .jpeg({ quality: QUALIDADE, mozjpeg: true, chromaSubsampling: '4:4:4' })
       .toFile(para)
+
+    // ------------------------------------------------------------ pequena
+    // A miniatura do album e da colecao renderiza com ~86px de largura, e
+    // baixar 910 KB de 2048x2048 para isso e absurdo: uma pagina do album
+    // mostra dezenas delas de uma vez. Com seis personagens sao 162 artes e
+    // 144 MB no bundle.
+    //
+    // 512 e folgado ate em tela retina, e custa ~15x menos.
+    const dirP = join(destino, 'p')
+    mkdirSync(dirP, { recursive: true })
+    await sharp(de)
+      .resize(512, 512, { fit: 'cover', position: 'centre' })
+      .jpeg({ quality: 78, mozjpeg: true })
+      .toFile(join(dirP, `${skin}.jpg`))
     bytesAntes += statSync(de).size
     bytesDepois += statSync(para).size
   }

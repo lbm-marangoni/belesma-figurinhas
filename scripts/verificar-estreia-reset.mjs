@@ -269,11 +269,15 @@ checar('BOOSTER de volta ao allotment inicial',
   Number(dep.comuns) === 12 * j && Number(dep.raros) === 5 * j && Number(dep.ultras) === 2 * j,
   `${dep.comuns}/${dep.raros}/${dep.ultras} para ${j} jogadores (esperado ${12*j}/${5*j}/${2*j})`)
 checar('nenhum pacote diario pendente',   Number(dep.diarios) === 0, `${dep.diarios}`)
-checar('reserva diaria refeita',          Number(dep.reservadas) === 1500, `${dep.reservadas}`)
+const NCHR = Number((await um(`select count(*) as n from characters`)).n)
+checar('reserva diaria refeita',          Number(dep.reservadas) === NCHR * 500,
+  `${dep.reservadas}`)
 
 // o mundo nao encolheu nem perdeu os selos
-checar('o acervo do mundo continua 6642', Number(dep.total_copias) === 6642, `${dep.total_copias}`)
-checar('os selos continuam 36/12/3 (51 no total)', Number(dep.selos) === 51, `${dep.selos}`)
+checar('o acervo do mundo continua intacto',
+  Number(dep.total_copias) === NCHR * 2214, `${dep.total_copias}`)
+checar('os selos continuam 17 por personagem',
+  Number(dep.selos) === NCHR * 17, `${dep.selos}`)
 
 // e o reset fica registrado
 const log = await um(`select count(*) as n from admin_log where acao = 'admin_recomecar_do_zero'`)

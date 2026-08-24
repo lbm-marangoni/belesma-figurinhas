@@ -74,7 +74,11 @@ export function Figurinha({
           </div>
         ) : (
           <img
-            src={`${import.meta.env.BASE_URL}figurinhas/${carta.character_slug}/${carta.skin}.jpg`}
+            /* A miniatura puxa a versao de 512 (pasta p/), nao a de 2048.
+               Uma pagina do album mostra dezenas delas: com a arte cheia sao
+               dezenas de MB para renderizar slots de 86px. */
+            src={`${import.meta.env.BASE_URL}figurinhas/${carta.character_slug}/${
+              tamanho === 'miniatura' ? 'p/' : ''}${carta.skin}.jpg`}
             alt={`${carta.character_name} ${carta.skin}`}
             loading="lazy"
             draggable={false}

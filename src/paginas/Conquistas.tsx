@@ -113,7 +113,8 @@ function Selo({ personagem, skin, tier, descoberto, titulo }: {
     <div title={titulo} className="relative aspect-square overflow-hidden rounded"
          style={{ border: `1.5px solid ${COR_TIER[tier]}` }}>
       <img
-        src={`${import.meta.env.BASE_URL}figurinhas/${personagem}/${skin}.jpg`}
+        /* o indice global e uma grade de miniaturas: versao pequena */
+        src={`${import.meta.env.BASE_URL}figurinhas/${personagem}/p/${skin}.jpg`}
         alt={skin} loading="lazy"
         className="h-full w-full object-cover"
       />

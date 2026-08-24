@@ -523,7 +523,7 @@ function Pagina({
             <h2>Selados</h2><span>{seladas.length} no seu acervo</span>
           </div>
         )}
-        <div className="grade-slots">
+        <div className="grade-slots" style={{ ['--colunas' as string]: 3 }}>
           {fatia.map((c) => (
             <button key={c.copy_id} className="slot slot-colada" onClick={() => aoAbrir(c)}>
               <Figurinha carta={c} tamanho="miniatura" />
@@ -548,6 +548,9 @@ function Pagina({
 
   const totalTier = doTier.length
   const feitas = doTier.filter((t) => coladas.has(t.id)).length
+  // quantos personagens dividem a mesma skin: e a largura da fileira
+  const porSkin = Math.max(1, ...spread.skins.map(
+    (sk) => doTier.filter((t) => t.skin === sk).length))
 
   // página direita sem slots vira a placa do tema
   if (skinsAqui.length === 0) {
@@ -584,7 +587,10 @@ function Pagina({
         </div>
       )}
 
-      <div className="grade-slots">
+      {/* Uma coluna por personagem. Estava fixo em 3 no CSS: com o quarto
+          Belesma a linha de cada skin quebrava em duas e o album deixava de
+          se ler como "uma fileira por tema". */}
+      <div className="grade-slots" style={{ ['--colunas' as string]: porSkin }}>
         {skinsAqui.map((skin) => {
           const daSkin = doTier.filter((t) => t.skin === skin)
             .sort((a, b) => a.display_order - b.display_order)
