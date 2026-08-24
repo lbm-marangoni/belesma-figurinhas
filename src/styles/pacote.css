@@ -29,7 +29,11 @@
    pacote um pouco abaixo do meio da tela — que é onde a mão alcança. */
 .palco-abertura {
   position: relative;
-  width: min(320px, 74vw);
+  /* O pacote precisa ser visivelmente MAIOR que a figurinha que sai dele -
+     senao a carta emergindo parece do tamanho do pacote e o gesto de puxar
+     perde a escala. Era 320px; a carta ocupa 58% da largura, entao ela sai
+     com ~220px contra 380 de pacote. */
+  width: min(380px, 86vw);
   aspect-ratio: 866 / 1760;
   display: flex;
   align-items: flex-end;
@@ -183,7 +187,12 @@
   position: absolute;
   inset: 0;
   clip-path: var(--corte-baixo);
-  background: linear-gradient(180deg, rgba(0,0,0,0.94) 0 5%, rgba(0,0,0,0.4) 13%, transparent 24%);
+  /* A sombra do interior do pacote. Era 0.94 opaca nos primeiros 5%, o que
+     virava uma FAIXA PRETA reta no rasgo em vez de parecer profundidade -
+     mais ainda depois que o PNG deixou de ter margem e a mascara passou a
+     encostar na borda. Fica sutil: escurece, nao pinta. */
+  background: linear-gradient(180deg,
+    rgba(0,0,0,0.62) 0 2%, rgba(0,0,0,0.3) 9%, transparent 20%);
   -webkit-mask-image: var(--arte);
   mask-image: var(--arte);
   -webkit-mask-size: 100% 100%;
@@ -229,8 +238,8 @@
   position: absolute;
   left: 50%;
   bottom: 0;
-  width: 62%;
-  margin-left: -31%;
+  width: 58%;
+  margin-left: -29%;
   transform: translateY(calc((1 - var(--puxada, 0)) * 100%));
   will-change: transform;
 }

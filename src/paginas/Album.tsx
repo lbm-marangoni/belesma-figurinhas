@@ -79,6 +79,16 @@ export default function Album() {
    * do que a animacao em si, e o que fazia a virada parecer quebrada.
    */
   const [alturaTravada, setAlturaTravada] = useState<number | null>(null)
+  /**
+   * No celular a navegacao e por MEIA folha: 1e, 1d, 2e, 2d.
+   *
+   * A tentativa anterior era jogar o spread inteiro na pagina esquerda, mas
+   * um tier com quatro skins vira 24 slots numa coluna de 3 - alto demais
+   * para caber, e Origens aparecia sem noite nem original. Meia folha por
+   * vez mantem a mesma divisao do desktop e o que soma e o numero de
+   * passadas, nao a altura.
+   */
+  const [ladoMobile, setLadoMobile] = useState<'esq' | 'dir'>('esq')
   const alvoPag = useRef(0)
   const [emFoco, setEmFoco] = useState<Carta | null>(null)
 
@@ -309,8 +319,32 @@ export default function Album() {
     (typeof window !== 'undefined' &&
      window.matchMedia('(prefers-reduced-motion: reduce)').matches)
 
+  // No celular a pagina direita de um tier com uma skin so e a placa da
+  // tiragem, e nao vale uma passada de dedo: pula.
+  const temDireita = (i: number) => {
+    const sp = spreads[i]
+    return !!sp && sp.tier !== 'selados' && sp.skins.length > 1
+  }
+
   const virar = (d: number) => {
     if (virando) return
+
+    if (estreito) {
+      // sequencia: 1e -> 1d -> 2e -> 2d ...
+      if (d > 0) {
+        if (ladoMobile === 'esq' && temDireita(indice)) return setLadoMobile('dir')
+        if (indice + 1 >= spreads.length) return
+        setIndice(indice + 1); setLadoMobile('esq')
+      } else {
+        if (ladoMobile === 'dir') return setLadoMobile('esq')
+        if (indice - 1 < 0) return
+        setIndice(indice - 1)
+        setLadoMobile(temDireita(indice - 1) ? 'dir' : 'esq')
+      }
+      alvoPag.current = indice
+      return
+    }
+
     const destino = indice + d
     if (destino < 0 || destino >= spreads.length) return
     alvoPag.current = destino
@@ -380,15 +414,19 @@ export default function Album() {
       <div className="mesa">
         <div ref={livro} className={`livro tema-${mostrando.tier}`}
              style={alturaTravada ? { height: alturaTravada } : undefined}>
-          {/* esquerda: no avanço já mostra a de destino sendo revelada */}
-          <Pagina spread={virando === 'frente' ? destino : atual} lado="esq"
-                  umaPagina={estreito} {...props} />
-          {virando === 'frente' && <span className="sombra-varrida" />}
-
-          {/* direita, por baixo: a próxima. No celular ela não existe — e é
-              melhor não renderizar do que esconder com display:none, senão o
-              conteúdo dela some sem ninguém perceber. */}
-          {!estreito && <Pagina spread={virando ? destino : atual} lado="dir" {...props} />}
+          {/* No celular renderiza UMA meia folha - a que o dedo trouxe - com a
+              mesma divisao de skins do desktop. No desktop, as duas. */}
+          {estreito ? (
+            <Pagina spread={atual} lado={ladoMobile} {...props} />
+          ) : (
+            <>
+              {/* esquerda: no avanço já mostra a de destino sendo revelada */}
+              <Pagina spread={virando === 'frente' ? destino : atual} lado="esq" {...props} />
+              {virando === 'frente' && <span className="sombra-varrida" />}
+              {/* direita, por baixo: a próxima */}
+              <Pagina spread={virando ? destino : atual} lado="dir" {...props} />
+            </>
+          )}
 
           {/* a folha que gira sobre a lombada */}
           {virando && (
@@ -406,14 +444,21 @@ export default function Album() {
       </div>
 
       <div className="mx-auto mt-4 flex w-[min(82rem,94vw)] items-center justify-center gap-4 text-sm">
-        <button onClick={() => virar(-1)} disabled={indice === 0 || !!virando}
+        <button onClick={() => virar(-1)}
+          disabled={(indice === 0 && (!estreito || ladoMobile === 'esq')) || !!virando}
           className="rounded border border-neutral-700 px-4 py-1 text-neutral-300 disabled:opacity-30">
           ←
         </button>
         <span className="text-neutral-500">
-          {mostrando.titulo} · {(virando ? alvoPag.current : indice) + 1}/{spreads.length}
+          {mostrando.titulo} ·{' '}
+          {/* no celular a pagina tem lado: 3e, 3d */}
+          {(virando ? alvoPag.current : indice) + 1}{estreito && (ladoMobile === 'esq' ? 'e' : 'd')}
+          /{spreads.length}
         </span>
-        <button onClick={() => virar(1)} disabled={indice === spreads.length - 1 || !!virando}
+        <button onClick={() => virar(1)}
+          disabled={(indice === spreads.length - 1
+                     && (!estreito || ladoMobile === 'dir' || !temDireita(indice)))
+                    || !!virando}
           className="rounded border border-neutral-700 px-4 py-1 text-neutral-300 disabled:opacity-30">
           →
         </button>
@@ -523,11 +568,8 @@ export default function Album() {
 // ================================================================ página
 function Pagina({
   spread, lado, tipos, coladas, minhas, slotAlvo, colandoAgora, aoAbrir, nua, tipoArrastado,
-  umaPagina,
 }: {
   spread: Spread; lado: 'esq' | 'dir'
-  /** celular: existe só a página esquerda, e ela carrega o spread inteiro */
-  umaPagina?: boolean
   tipos: Tipo[]; coladas: Map<number, Carta>; minhas: Carta[]
   slotAlvo: number | null; colandoAgora: number | null
   aoAbrir: (c: Carta) => void
@@ -540,9 +582,7 @@ function Pagina({
   if (spread.tier === 'selados') {
     const seladas = minhas.filter((c) => c.seal !== 'none').sort((a, b) => a.tier_order - b.tier_order)
     const metade = Math.ceil(seladas.length / 2)
-    const fatia = umaPagina
-      ? seladas
-      : lado === 'esq' ? seladas.slice(0, metade) : seladas.slice(metade)
+    const fatia = lado === 'esq' ? seladas.slice(0, metade) : seladas.slice(metade)
     return (
       <div className={classe}>
         {lado === 'esq' && (
@@ -564,14 +604,12 @@ function Pagina({
 
   const doTier = tipos.filter((t) => t.tier === spread.tier)
   const meio = Math.ceil(spread.skins.length / 2)
-  // O spread divide as skins entre as duas páginas. No celular só a esquerda
-  // existe, então dividir ali APAGA metade do tier — era por isso que
-  // Origens mostrava só chuva e musgo, sem noite nem original.
-  const skinsAqui = umaPagina
+  // O spread divide as skins entre as duas páginas, no desktop e no celular.
+  // No celular a diferença é só que as duas metades viram passadas de dedo
+  // separadas (1e, 1d) em vez de aparecerem lado a lado.
+  const skinsAqui = spread.skins.length === 1
     ? (lado === 'esq' ? spread.skins : [])
-    : spread.skins.length === 1
-      ? (lado === 'esq' ? spread.skins : [])
-      : (lado === 'esq' ? spread.skins.slice(0, meio) : spread.skins.slice(meio))
+    : (lado === 'esq' ? spread.skins.slice(0, meio) : spread.skins.slice(meio))
 
   const totalTier = doTier.length
   const feitas = doTier.filter((t) => coladas.has(t.id)).length
@@ -609,7 +647,7 @@ function Pagina({
           <span>
             {ROTULO_TIER[spread.tier as Tier]} · {feitas}/{totalTier}
             {/* sem página direita não há a placa da tiragem: ela vem para cá */}
-            {umaPagina && doTier[0] && <> · tiragem {doTier[0].print_run}</>}
+            {doTier[0] && <> · tiragem {doTier[0].print_run}</>}
           </span>
         </div>
       )}

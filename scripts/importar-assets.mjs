@@ -225,7 +225,17 @@ for (const tipo of ['comum', 'raro', 'ultra']) {
   const de = join(dirPacks, `booster-${tipo}.png`)
   if (!existsSync(de)) { console.log(`booster-${tipo}: nao achei em ${dirPacks}`); erros++; continue }
   const para = join(publico, 'packs', `booster-${tipo}.png`)
-  await sharp(de).png({ compressionLevel: 9, quality: 90 }).toFile(para)
+  // RECORTA na borda do conteudo opaco.
+  //
+  // Os originais vem 1000x1339 com ~69px de margem transparente. O pacote 3D
+  // usa a BORDA DO ARQUIVO como borda do objeto: as quatro faces laterais e
+  // o mylar sao posicionados por ela. Com margem, tudo isso pinta fora da
+  // arte e o pacote parece estar dentro de um vidro - e o rasgo mostra preto
+  // onde deveria mostrar transparencia.
+  //
+  // Isto ja tinha sido feito na mao uma vez e voltou na primeira reimportacao
+  // de assets. Feito aqui nao volta mais.
+  await sharp(de).trim({ threshold: 0 }).png({ compressionLevel: 9, quality: 90 }).toFile(para)
   const m = await sharp(para).metadata()
   console.log(`booster-${tipo}.png: ${m.width}x${m.height} alfa=${m.hasAlpha} ${(statSync(para).size / 1024 | 0)} KB`)
   if (!m.hasAlpha) erros++

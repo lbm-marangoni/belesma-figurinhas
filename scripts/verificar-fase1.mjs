@@ -432,6 +432,56 @@ console.log('\n== o pool nao entrega onde estao os selos ==')
     somaPool === Number(noPool.n), `${somaPool} vs ${noPool.n}`)
 }
 
+
+// ================================================================ piso do selo
+console.log('\n== um selo por personagem cai em mitica ou + ==')
+{
+  const piso = Number((await um(`select tier_order from tiers where slug='mitica'`)).tier_order)
+  const porChar = await tudo(`
+    select ch.slug,
+           count(*) filter (where cc.seal <> 'none')                         as selos,
+           count(*) filter (where cc.seal <> 'none' and ct.tier_order >= $1) as altos
+    from card_copies cc
+    join card_types ct on ct.id = cc.card_type_id
+    join characters ch on ch.id = ct.character_id
+    where cc.seal <> 'none' or true
+    group by ch.slug order by ch.slug`, [piso])
+
+  checar('todo personagem tem 17 selos', porChar.every((c) => Number(c.selos) === 17),
+    porChar.map((c) => `${c.slug}:${c.selos}`).join(' '))
+  checar('e EXATAMENTE um deles em mitica ou melhor',
+    porChar.every((c) => Number(c.altos) === 1),
+    porChar.map((c) => `${c.slug}:${c.altos}`).join(' '))
+
+  // a cor da alta nao e fixa: tem que variar entre personagens ao longo de
+  // varias rodadas. Aqui so se cobra que ela NAO seja sempre a mesma por
+  // construcao - o teste de fato e a distribuicao, feita abaixo.
+  const cores = await tudo(`
+    select cc.seal::text as cor, count(*) as n
+    from card_copies cc join card_types ct on ct.id = cc.card_type_id
+    where cc.seal <> 'none' and ct.tier_order >= $1 group by 1`, [piso])
+  console.log('   cor da carta alta: ' + cores.map((c) => `${c.cor} ${c.n}`).join(' · '))
+
+  // e as outras 16 nunca podem estar acima do piso
+  const acima = await um(`
+    select count(*) as n from card_copies cc
+    join card_types ct on ct.id = cc.card_type_id
+    where cc.seal <> 'none' and ct.tier_order >= $1`, [piso])
+  const chars = await um(`select count(*) as n from characters`)
+  checar('nem um a mais que um por personagem',
+    Number(acima.n) === Number(chars.n), `${acima.n} altos para ${chars.n} personagens`)
+
+  // a contagem por cor do mundo nao mudou
+  const cont = await um(`select
+    count(*) filter (where seal='branco') as b,
+    count(*) filter (where seal='preto')  as p,
+    count(*) filter (where seal='rosa')   as r from card_copies`)
+  checar('a contagem 12/4/1 por personagem continua de pe',
+    Number(cont.b) === Number(chars.n) * 12 && Number(cont.p) === Number(chars.n) * 4
+    && Number(cont.r) === Number(chars.n),
+    `${cont.b}/${cont.p}/${cont.r}`)
+}
+
 console.log(`\n${falhas === 0 ? 'TUDO PASSOU' : falhas + ' FALHA(S)'}`)
 await db.close()
 process.exit(falhas === 0 ? 0 : 1)

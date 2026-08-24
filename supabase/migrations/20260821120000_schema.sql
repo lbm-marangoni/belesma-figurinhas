@@ -390,6 +390,10 @@ $$;
 -- Imutabilidade e auditoria continuam de pe, mas por seal_audit em vez de por
 -- reprodutibilidade: existindo a linha de auditoria, a funcao sai sem tocar
 -- em nada. Rodar o seed de novo nunca re-sorteia.
+-- Um dos 17 cai obrigatoriamente em mitica ou melhor. A regra vive AQUI e
+-- nao so na migracao que a introduziu: o seed chama esta funcao, e um
+-- banco novo tem que nascer ja com o piso. Ver 20260824130000 para o
+-- porque, com os numeros que motivaram a mudanca.
 create or replace function private.distribuir_selos(p_character_id int)
 returns void
 language plpgsql
@@ -399,6 +403,8 @@ set search_path = public, extensions, pg_temp
 as $fn$
 declare
   n_total int;
+  n_alto  int;
+  v_piso  smallint;
 begin
   if exists (select 1 from public.seal_audit where character_id = p_character_id) then
     return;   -- ja sorteado, e selo nao se re-sorteia
@@ -413,17 +419,43 @@ begin
     raise exception 'personagem % tem so % copias, nao da para 12/4/1', p_character_id, n_total;
   end if;
 
-  -- Uniforme sobre TODAS as copias do personagem, sem excluir tier nenhum -
-  -- inclusive a Prisma 1/1. Tiragem alta domina porque ha mais copias dela;
-  -- isso e a logica pedida, nao efeito colateral.
-  with sorteadas as (
-    select cc.id,
-           row_number() over (order by gen_random_bytes(8)) as rn
+  v_piso := (select tier_order from public.tiers where slug = 'mitica');
+
+  select count(*) into n_alto
+  from public.card_copies cc
+  join public.card_types ct on ct.id = cc.card_type_id
+  where ct.character_id = p_character_id and cc.origin = 'pull'
+    and cc.seal = 'none' and ct.tier_order >= v_piso;
+
+  if n_alto = 0 then
+    raise exception 'personagem % nao tem copia mitica ou melhor', p_character_id;
+  end if;
+
+  with alta as (
+    -- a garantida: uma copia mitica-ou-melhor, escolhida por CSPRNG
+    select cc.id
     from public.card_copies cc
     join public.card_types ct on ct.id = cc.card_type_id
-    where ct.character_id = p_character_id
-      and cc.origin = 'pull'
-      and cc.seal = 'none'
+    where ct.character_id = p_character_id and cc.origin = 'pull'
+      and cc.seal = 'none' and ct.tier_order >= v_piso
+    order by gen_random_bytes(8)
+    limit 1
+  ),
+  baixas as (
+    -- as outras 16, de ABAIXO do piso. Exatamente uma alta, como pedido:
+    -- deixar as 16 sortearem do pool inteiro permitiria duas por acaso.
+    select cc.id
+    from public.card_copies cc
+    join public.card_types ct on ct.id = cc.card_type_id
+    where ct.character_id = p_character_id and cc.origin = 'pull'
+      and cc.seal = 'none' and ct.tier_order < v_piso
+    order by gen_random_bytes(8)
+    limit 16
+  ),
+  sorteadas as (
+    -- as 17 juntas, re-embaralhadas: a COR nao sabe qual delas e a alta
+    select id, row_number() over (order by gen_random_bytes(8)) as rn
+    from (select id from alta union all select id from baixas) x
   )
   update public.card_copies cc
   set seal = case
@@ -432,14 +464,14 @@ begin
                else                 'rosa'::public.seal_type
              end
   from sorteadas s
-  where cc.id = s.id and s.rn <= 17;
+  where cc.id = s.id;
 
   insert into public.seal_audit (character_id, branco, preto, rosa, checksum)
   select p_character_id,
          count(*) filter (where cc.seal = 'branco'),
          count(*) filter (where cc.seal = 'preto'),
          count(*) filter (where cc.seal = 'rosa'),
-         md5(string_agg(cc.verify_code || ':' || cc.seal::text, '|' order by cc.verify_code))
+         md5(string_agg(cc.id::text, ',' order by cc.id))
   from public.card_copies cc
   join public.card_types ct on ct.id = cc.card_type_id
   where ct.character_id = p_character_id and cc.seal <> 'none';

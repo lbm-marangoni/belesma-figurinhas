@@ -384,6 +384,9 @@
     gap: .7rem .5rem;
     grid-template-columns: repeat(min(var(--colunas, 3), 3), 1fr);
   }
+  /* a meia folha do celular ocupa a largura toda do livro */
+  .livro > .pagina { border-radius: 4px; }
+  .pagina { min-height: 24rem; }
 
   /* o deck fica preso no rodapé e as cartas crescem para o polegar */
   .deck { padding: .5rem .6rem calc(.6rem + env(safe-area-inset-bottom)); }
