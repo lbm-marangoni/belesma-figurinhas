@@ -385,6 +385,53 @@ const reserva2 = await um(`select count(*) as n from card_copies where reserved_
 checar('rodar tudo de novo nao infla a reserva', Number(reserva2.n) === NCH * 500,
   `${reserva2.n}`)
 
+
+// ================================================================ mapa dos selos
+console.log('\n== o pool nao entrega onde estao os selos ==')
+{
+  // O selo e sorteado no seed e gravado na copia. Se a copia parada no pool
+  // for legivel, qualquer um lista onde cada selo esta ANTES de sair - e
+  // escolhe qual booster comprar sabendo onde sobrou selo.
+  const noPool = await um(`select count(*) as n from card_copies
+    where seal <> 'none' and owner_id is null and first_discovered_at is null`)
+  console.log(`   ${noPool.n} copias seladas ainda no pool`)
+
+  const comoJogador = async (sql) => {
+    await db.exec(`set session request.jwt.claim.sub = '${outro}'; set role authenticated;`)
+    try { return (await db.query(sql)).rows }
+    finally { await db.exec('reset role;') }
+  }
+
+  const vazou = await comoJogador(`select id, seal from card_copies
+    where seal <> 'none' and owner_id is null and first_discovered_at is null`)
+  checar('jogador NAO enxerga copia selada parada no pool', vazou.length === 0,
+    `${vazou.length} linhas visiveis`)
+
+  const anon = async (sql) => {
+    await db.exec(`reset role; set role anon;`)
+    try { return (await db.query(sql)).rows }
+    finally { await db.exec('reset role;') }
+  }
+  const vazouAnon = await anon(`select id from card_copies
+    where owner_id is null and first_discovered_at is null`)
+  checar('anon tambem nao enxerga o pool intocado', vazouAnon.length === 0,
+    `${vazouAnon.length} linhas visiveis`)
+
+  // mas o que ja existe no jogo continua legivel
+  const visiveis = await comoJogador(`select count(*)::int as n from card_copies
+    where owner_id is not null or first_discovered_at is not null`)
+  const reais = await um(`select count(*)::int as n from card_copies
+    where owner_id is not null or first_discovered_at is not null`)
+  checar('o que ja saiu continua publico',
+    Number(visiveis[0].n) === Number(reais.n), `${visiveis[0].n} de ${reais.n}`)
+
+  // e o NUMERO de selos no pool continua publico, por tier
+  const est = (await um(`select public.estoque_publico() as e`)).e
+  const somaPool = est.por_tier.reduce((a, t) => a + Number(t.selados_no_pool ?? 0), 0)
+  checar('o estoque publico ainda diz QUANTOS selos faltam sair',
+    somaPool === Number(noPool.n), `${somaPool} vs ${noPool.n}`)
+}
+
 console.log(`\n${falhas === 0 ? 'TUDO PASSOU' : falhas + ' FALHA(S)'}`)
 await db.close()
 process.exit(falhas === 0 ? 0 : 1)

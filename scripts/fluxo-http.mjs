@@ -129,14 +129,29 @@ const { data: acervo, error: eCol } = await c
 checar('le o proprio acervo pela anon key', !eCol, eCol?.message)
 checar('acervo tem as cartas abertas', (acervo?.length ?? 0) >= 40, `${acervo?.length} copias`)
 
-// So as PUXADAS sao 6642. A forja cria supply PARALELO (spec §7), entao a
-// contagem total de card_copies cresce alem disso de proposito.
-const { count: puxadas } = await c.from('card_copies')
-  .select('id', { count: 'exact', head: true }).eq('origin', 'pull')
+// A tiragem do mundo NAO se conta mais linha a linha pelo cliente: a copia
+// parada no pool ficou invisivel, senao qualquer um listava onde esta cada
+// selo antes de sair. O numero continua publico - por funcao agregada, que
+// e security definer e nao passa pela policy.
 const { count: nch } = await c.from('characters').select('id', { count: 'exact', head: true })
-checar(`a tiragem puxavel segue em ${nch * 2214}`, puxadas === nch * 2214, `${puxadas}`)
-const { count: total } = await c.from('card_copies').select('id', { count: 'exact', head: true })
-checar('indice global continua publico', (total ?? 0) >= nch * 2214, `${total} linhas`)
+const { data: estPub } = await c.rpc('estoque_publico')
+const tiragem = (estPub?.por_tier ?? []).reduce((a, t) => a + Number(t.total), 0)
+checar(`a tiragem do mundo segue em ${nch * 2214}`, tiragem >= nch * 2214, `${tiragem}`)
+
+// e o que o jogador enxerga direto e SO o que ja existe no jogo
+const { count: visiveis } = await c.from('card_copies')
+  .select('id', { count: 'exact', head: true })
+checar('o pool intocado nao e legivel pelo jogador',
+  (visiveis ?? 0) < nch * 2214, `${visiveis} visiveis de ${nch * 2214}`)
+const { count: seladasNoPool } = await c.from('card_copies')
+  .select('id', { count: 'exact', head: true })
+  .neq('seal', 'none').is('owner_id', null).is('first_discovered_at', null)
+checar('e o mapa dos selos nao vaza', (seladasNoPool ?? 0) === 0, `${seladasNoPool}`)
+
+// o indice global continua publico, pela RPC
+const { data: gi } = await c.rpc('global_index')
+checar('indice global continua publico',
+  (gi?.personagens?.length ?? 0) === nch, `${gi?.personagens?.length} personagens`)
 
 // ================================================================ admin
 console.log('\n== /admin so para admin ==')
