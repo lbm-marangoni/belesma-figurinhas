@@ -152,7 +152,11 @@ h1, h2, h3 { letter-spacing: -0.015em; }
  * O jogo é para o celular antes de ser para o desktop: são 8 amigos abrindo
  * pacote no ônibus. Estas regras são sobre alcance do polegar e sobre nada
  * vazar para os lados. */
-@media (max-width: 640px) {
+/* 767 e nao 640: e o mesmo ponto em que a navegacao vira barra inferior.
+   Com dois breakpoints diferentes, entre 641 e 767 metade das regras de
+   celular valia e a outra metade nao - foi assim que a tabela larga deixou
+   de rolar justo nos tablets pequenos. */
+@media (max-width: 767px) {
   /* A barra de cima e as abas moram em navegacao.css, num @media de 767px.
      Aqui existiam regras concorrentes num @media de 640px: entre 641 e 767
      as duas valiam pela metade, e o mesmo nome de classe em dois arquivos

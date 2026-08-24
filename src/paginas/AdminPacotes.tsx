@@ -151,7 +151,7 @@ export default function AdminPacotes() {
           <button onClick={() => { setEdit(VAZIO()); setPreview(null) }}
             className="btn btn-forte px-3 py-1">novo pacote</button>
         </div>
-        <table className="w-full text-left">
+        <div className="overflow-x-auto"><table className="w-full text-left">
           <thead className="text-[11px] uppercase tracking-widest text-neutral-500">
             <tr><th className="py-1">pacote</th><th>distribuição</th><th>slots</th>
               <th>preço</th><th>aberturas</th><th>em mãos</th><th></th></tr>
@@ -190,7 +190,7 @@ export default function AdminPacotes() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </section>
 
       {/* ------------------------------------------------------------ editor */}
@@ -412,7 +412,7 @@ export default function AdminPacotes() {
                     {preview.cartas} cartas em {preview.aberturas} aberturas
                     ({preview.cartas_por_abertura} por pacote) · valor médio {preview.valor_medio} baba
                   </p>
-                  <table className="mt-1 w-full text-xs">
+                  <div className="overflow-x-auto"><table className="mt-1 w-full text-xs">
                     <tbody>
                       {preview.por_tier.map((t: any) => (
                         <tr key={t.tier}>
@@ -426,11 +426,11 @@ export default function AdminPacotes() {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </table></div>
                 </div>
                 <div>
                   <p className="text-xs text-neutral-500">por personagem</p>
-                  <table className="mt-1 w-full text-xs">
+                  <div className="overflow-x-auto"><table className="mt-1 w-full text-xs">
                     <tbody>
                       {preview.por_personagem.map((c: any) => (
                         <tr key={c.personagem}>
@@ -440,7 +440,7 @@ export default function AdminPacotes() {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </table></div>
                 </div>
               </div>
             )}
@@ -481,7 +481,7 @@ export default function AdminPacotes() {
         <p className="mb-2 text-xs text-neutral-500">
           Serve para ver se algum pacote ficou desbalanceado depois que a galera começou a usar.
         </p>
-        <table className="w-full text-left">
+        <div className="overflow-x-auto"><table className="w-full text-left">
           <thead className="text-[11px] uppercase tracking-widest text-neutral-500">
             <tr><th className="py-1">pacote</th><th>EV</th><th>piso</th><th>sugerido</th>
               <th>preço</th><th>margem</th><th>compras</th><th>aberturas</th></tr>
@@ -504,7 +504,7 @@ export default function AdminPacotes() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
         <p className="mt-2 text-xs text-neutral-600">
           Abaixo do piso não significa prejuízo: o piso é EV × 1,5, uma folga em cima do
           ponto de equilíbrio. O que não pode é preço abaixo do EV — aí comprar e vender

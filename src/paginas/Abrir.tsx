@@ -18,6 +18,8 @@ import type { ResultadoPacote, TipoPacote } from '../lib/tipos'
 export default function Abrir() {
   const { jogador, recarregar } = useSessao()
   const [res, setRes] = useState<ResultadoPacote | null>(null)
+  /** arte do pacote que esta abrindo, guardada antes da abertura */
+  const [arteAberta, setArteAberta] = useState<string | null>(null)
   const [animando, setAnimando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const [ocupado, setOcupado] = useState(false)
@@ -81,6 +83,9 @@ export default function Abrir() {
 
   async function abrir(def: number) {
     setErro(null); setOcupado(true); setRes(null); setEmFoco(null)
+    // guarda a arte ANTES de abrir: depois da abertura o pacote pode ter
+    // saido do inventario, e a animacao ainda precisa dela
+    setArteAberta(pilhas.find((p) => p.def === def)?.arte ?? null)
     const { data, error } = await supabase.rpc('open_pack', { p_pack_definition_id: def })
     setOcupado(false)
     if (error) return setErro(error.message)
@@ -154,6 +159,7 @@ export default function Abrir() {
       {res && animando && (
         <Pacote3D
           tipo={(res.pack_type ?? 'comum') as TipoPacote}
+          arte={arteAberta}
           cartas={res.cartas}
           quente={res.quente}
           aoTerminar={() => setAnimando(false)}

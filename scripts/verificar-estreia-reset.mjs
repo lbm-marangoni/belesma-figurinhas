@@ -136,11 +136,12 @@ checar('em_jogo bate com as copias com dono', Number(t.em_jogo) ===
 // ================================================================ escassez
 console.log('\n== a joia mede escassez conjunta ==')
 
-// Censo do mundo por (tier, selo). E dele que sai a pontuacao: nenhum peso
-// escolhido a mao, so contagem.
-const censo = async (tier, selo) => Number((await um(
-  `select copias from private.censo_raridade where tier = $1 and seal = $2`,
-  [tier, selo]))?.copias ?? 0)
+// Censo do mundo por (SKIN, selo). Por tier juntava galaxia com nebulosa, e
+// uma galaxia selada - unica no mundo - aparecia como "2 iguais" so porque
+// existia uma nebulosa selada em outro lugar.
+const censo = async (skin, selo) => Number((await um(
+  `select copias from private.censo_raridade where skin = $1 and seal = $2`,
+  [skin, selo]))?.copias ?? 0)
 
 const pts = async (copias, tierOrder, serial = 50, origem = 'pull', dano = 0) =>
   Number((await um(`select private.pontos_carta($1,$2::smallint,$3,$4::copy_origin,$5) as p`,
@@ -152,7 +153,7 @@ const ordem = Object.fromEntries((await tudo(`select slug, tier_order from tiers
 // O caso do jogador: cosmica + selo branco (1 no mundo) contra divina limpa.
 // Antes a divina ganhava por estar um degrau acima na escada de tiers.
 {
-  const divinas = await censo('divina', 'none')
+  const divinas = await censo('celestial', 'none')   // a unica skin divina
   const a = await pts(1, ordem.cosmica)          // 1 de 1 no mundo
   const b = await pts(divinas, ordem.divina)
   checar('cosmica + selo (1 no mundo) vence divina limpa', a > b,
@@ -163,7 +164,7 @@ const ordem = Object.fromEntries((await tudo(`select slug, tier_order from tiers
 // tem menos galaxys pro selo cair" - o censo ja diz isso sozinho.
 {
   const cosmicaBranco = 1
-  const comumPreto = Math.max(await censo('comum', 'preto'), 1)
+  const comumPreto = Math.max(await censo('chuva', 'preto'), 1)
   const a = await pts(cosmicaBranco, ordem.cosmica)
   const b = await pts(comumPreto, ordem.comum)
   checar('cosmica + branco vence comum + preto', a > b,
@@ -172,7 +173,7 @@ const ordem = Object.fromEntries((await tudo(`select slug, tier_order from tiers
 
 // "uma infernal /5 com selo branco vale mais que uma diamante /2 limpa?"
 {
-  const diamantes = await censo('diamante', 'none')
+  const diamantes = await censo('diamante', 'none')  // skin e tier tem o mesmo nome
   const a = await pts(1, ordem.infernal)         // se existisse, seria 1 de 1
   const b = await pts(diamantes, ordem.diamante)
   checar('infernal + selo (1 no mundo) vence diamante limpa', a > b,
@@ -189,7 +190,7 @@ const ordem = Object.fromEntries((await tudo(`select slug, tier_order from tiers
 // e nenhum desempate pode inverter uma diferenca de escassez, nem entre as
 // classes mais povoadas, onde a diferenca de pontos e a menor de todas
 {
-  const raras = await censo('rara', 'none'), incomuns = await censo('incomum', 'none')
+  const raras = await censo('fogo', 'none'), incomuns = await censo('bronze', 'none')
   const menorPasso = Math.abs(await pts(raras, 1, 999, 'forge', 3)
                             - await pts(incomuns, 1, 999, 'forge', 3))
   const maiorDesempate = (await pts(1, 12, 1)) - (await pts(1, 0, 999, 'forge', 3))

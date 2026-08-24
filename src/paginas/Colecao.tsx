@@ -124,8 +124,8 @@ export default function Colecao() {
 
   useEffect(() => {
     supabase.rpc('escassez_por_classe').then(({ data }) => {
-      setCenso(new Map(((data ?? []) as { tier: string; seal: string; copias: number }[])
-        .map((r) => [`${r.tier}|${r.seal}`, Number(r.copias)])))
+      setCenso(new Map(((data ?? []) as { skin: string; seal: string; copias: number }[])
+        .map((r) => [`${r.skin}|${r.seal}`, Number(r.copias)])))
     })
   }, [])
 
@@ -133,15 +133,15 @@ export default function Colecao() {
    * Quantas cópias iguais a esta existem no mundo — mesmo número que decide
    * a joia na Caçada de serial.
    *
-   * Ordenar só por tier_order tratava o selo como enfeite: uma cósmica
-   * selada, única no mundo, caía abaixo de qualquer divina. O selo é um
-   * segundo eixo de escassez — um selo cair numa cósmica é muito mais
-   * improvável do que cair numa comum, porque há menos cósmicas para ele
-   * cair. Enquanto o censo não chega, cai no tier, que é a melhor
+   * Conta por (skin, selo), não por (tier, selo): galáxia e nebulosa são
+   * cartas diferentes, e agrupá-las fazia uma galáxia selada — única no
+   * mundo — aparecer como "2 iguais" só porque existia uma nebulosa selada.
+   *
+   * Enquanto o censo não chega do servidor, cai no tier, que é a melhor
    * aproximação disponível.
    */
   const iguaisNoMundo = (c: Carta) =>
-    censo.get(`${c.tier}|${c.seal}`) ?? (10000 - c.tier_order)
+    censo.get(`${c.skin}|${c.seal}`) ?? (10000 - c.tier_order)
 
   const personagens = useMemo(
     () => [...new Set((cartas ?? []).map((c) => c.character_slug))].sort(), [cartas])

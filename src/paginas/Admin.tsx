@@ -159,7 +159,7 @@ function Sorteio() {
           Só slots de hit naturais — promoção, pacote quente e pity ficam de fora, senão
           poluiriam a amostra. Com poucas aberturas a variância é grande; olhe a tendência.
         </p>
-        <table className="w-full max-w-2xl text-left">
+        <div className="overflow-x-auto"><table className="w-full max-w-2xl text-left">
           <thead className="text-xs text-neutral-500">
             <tr className="border-b border-neutral-800">
               <th className="py-1 font-normal">pacote</th><th className="font-normal">tier</th>
@@ -184,7 +184,7 @@ function Sorteio() {
               )
             })}
           </tbody>
-        </table>
+        </table></div>
       </div>
     </div>
   )
@@ -210,7 +210,7 @@ function Jogadores() {
   return (
     <div className="space-y-6">
       <Aviso />
-      <table className="w-full text-left text-sm">
+      <div className="overflow-x-auto"><table className="w-full text-left text-sm">
         <thead className="text-neutral-500">
           <tr className="border-b border-neutral-800">
             <th className="py-1 font-normal">apelido</th>
@@ -248,7 +248,7 @@ function Jogadores() {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
 
       {/* "Dar pacotes" saiu daqui. Ele tinha um select fixo com comum, raro e
           ultra, e desde que pacote virou dado essa lista nasce desatualizada
@@ -405,7 +405,7 @@ function Estoque() {
 const Tabela = ({ titulo, cols, linhas }: { titulo: string; cols: string[]; linhas: any[][] }) => (
   <section>
     <h3 className="mb-1 font-medium">{titulo}</h3>
-    <table className="w-full text-left">
+    <div className="overflow-x-auto"><table className="w-full text-left">
       <thead className="text-neutral-500">
         <tr className="border-b border-neutral-800">
           {cols.map((c, i) => <th key={c} className={`py-1 font-normal ${i ? 'text-right' : ''}`}>{c}</th>)}
@@ -418,7 +418,7 @@ const Tabela = ({ titulo, cols, linhas }: { titulo: string; cols: string[]; linh
           </tr>
         ))}
       </tbody>
-    </table>
+    </table></div>
   </section>
 )
 
@@ -630,7 +630,7 @@ function Log() {
       <p className="mb-3 text-neutral-500">
         Somente leitura. Nem admin edita nem apaga — a RLS bloqueia UPDATE e DELETE para todos.
       </p>
-      <table className="w-full text-left">
+      <div className="overflow-x-auto"><table className="w-full text-left">
         <thead className="text-neutral-500">
           <tr className="border-b border-neutral-800">
             <th className="py-1 font-normal">quando</th>
@@ -653,7 +653,7 @@ function Log() {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
       {linhas.length === 0 && <p className="py-6 text-neutral-500">nada registrado ainda</p>}
     </div>
   )

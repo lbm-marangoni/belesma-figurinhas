@@ -23,7 +23,11 @@
 -- "A joia e a carta com menos copias iguais no mundo." Uma frase, conferivel
 -- por qualquer um, e que se ajusta sozinha quando o quarto personagem
 -- entrar por seed_edition.
-create or replace view private.censo_raridade as
+-- O drop antes do create nao e enfeite: uma migracao posterior troca a
+-- coluna de `tier` para `skin`, e `create or replace view` nao renomeia
+-- coluna. Sem isto, reaplicar a cadeia inteira estoura.
+drop view if exists private.censo_raridade;
+create view private.censo_raridade as
 select ct.tier, cc.seal, count(*)::int as copias
 from public.card_copies cc
 join public.card_types ct on ct.id = cc.card_type_id

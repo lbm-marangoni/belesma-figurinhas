@@ -323,12 +323,22 @@ export default function Album() {
 
   const atual = spreads[indice]
   const destino = spreads[alvoPag.current] ?? atual
+  /**
+   * O spread que a tela esta MOSTRANDO agora.
+   *
+   * As paginas por baixo da folha ja renderizam o destino desde o primeiro
+   * quadro da virada - mas o tema do livro e o rodape ficavam presos no
+   * spread antigo e trocavam de uma vez quando a animacao acabava. Cor de
+   * papel de um tier com conteudo de outro, e o titulo pulando no fim: era
+   * isso que fazia a passagem parecer quebrada.
+   */
+  const mostrando = virando ? destino : atual
 
   // deck: o que tenho desta abertura e ainda não colei
   const doSpread = new Set(
-    atual.tier === 'selados'
+    mostrando.tier === 'selados'
       ? []
-      : tipos.filter((t) => t.tier === atual.tier).map((t) => t.id))
+      : tipos.filter((t) => t.tier === mostrando.tier).map((t) => t.id))
   // O deck mostra o que da para colar E o que da para TROCAR: se o slot ja
   // esta colado mas você tem outra cópia daquele tipo, ela continua na mão.
   // Colei uma comum e depois saiu uma selada? a selada aparece para trocar.
@@ -354,7 +364,7 @@ export default function Album() {
 
   return (
     <div className="p-3 sm:p-5">
-      <div className="mx-auto mb-3 flex w-[min(100rem,96vw)] items-center justify-between text-sm">
+      <div className="mx-auto mb-3 flex w-[min(82rem,94vw)] items-center justify-between text-sm">
         <span className="text-neutral-400">
           <strong className="text-neutral-100">{total.coladas}</strong> coladas ·{' '}
           {total.tenho} no acervo · {total.de} no álbum
@@ -368,7 +378,7 @@ export default function Album() {
       </div>
 
       <div className="mesa">
-        <div ref={livro} className={`livro tema-${atual.tier}`}
+        <div ref={livro} className={`livro tema-${mostrando.tier}`}
              style={alturaTravada ? { height: alturaTravada } : undefined}>
           {/* esquerda: no avanço já mostra a de destino sendo revelada */}
           <Pagina spread={virando === 'frente' ? destino : atual} lado="esq"
@@ -395,12 +405,14 @@ export default function Album() {
         </div>
       </div>
 
-      <div className="mx-auto mt-4 flex w-[min(100rem,96vw)] items-center justify-center gap-4 text-sm">
+      <div className="mx-auto mt-4 flex w-[min(82rem,94vw)] items-center justify-center gap-4 text-sm">
         <button onClick={() => virar(-1)} disabled={indice === 0 || !!virando}
           className="rounded border border-neutral-700 px-4 py-1 text-neutral-300 disabled:opacity-30">
           ←
         </button>
-        <span className="text-neutral-500">{atual.titulo} · {indice + 1}/{spreads.length}</span>
+        <span className="text-neutral-500">
+          {mostrando.titulo} · {(virando ? alvoPag.current : indice) + 1}/{spreads.length}
+        </span>
         <button onClick={() => virar(1)} disabled={indice === spreads.length - 1 || !!virando}
           className="rounded border border-neutral-700 px-4 py-1 text-neutral-300 disabled:opacity-30">
           →
@@ -408,7 +420,7 @@ export default function Album() {
       </div>
 
       {/* ------------------------------------------------------------ deck */}
-      {atual.tier !== 'selados' && (
+      {mostrando.tier !== 'selados' && (
         <div className="deck">
           <p className="mb-1.5 text-[11px] uppercase tracking-widest text-neutral-500">
             {deck.length > 0

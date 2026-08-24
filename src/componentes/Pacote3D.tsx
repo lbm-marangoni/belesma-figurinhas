@@ -38,9 +38,11 @@ function linhaDeRasgo() {
 }
 
 export function Pacote3D({
-  tipo, cartas, quente, aoTerminar,
+  tipo, arte: artePacote, cartas, quente, aoTerminar,
 }: {
   tipo: TipoPacote
+  /** caminho da arte, vindo da DEFINICAO do pacote */
+  arte?: string | null
   cartas: Carta[]
   quente: boolean
   aoTerminar: () => void
@@ -60,7 +62,12 @@ export function Pacote3D({
   const reduzido = typeof window !== 'undefined' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-  const arte = `${import.meta.env.BASE_URL}packs/booster-${tipo}.png`
+  // A arte vem da definicao. Montar `packs/booster-<tipo>.png` funcionava
+  // enquanto tipo era comum/raro/ultra; com pacote virando dado o campo
+  // passou a ser o slug, e um "Booster Pedrao" pedia
+  // booster-booster-pedrao.png. O pacote 3D abria sem textura nenhuma.
+  const arte = `${import.meta.env.BASE_URL}${
+    artePacote?.replace(/^\//, '') ?? `packs/booster-${tipo}.png`}`
 
   // Pré-carrega as artes do pacote inteiro assim que ele abre.
   //
