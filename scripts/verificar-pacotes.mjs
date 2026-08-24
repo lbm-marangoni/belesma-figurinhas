@@ -117,6 +117,60 @@ for (const [slug, esperado] of [['elementais', ['rara']], ['joias', ['epica']]])
     decrescente, pesos.map((x) => x.toFixed(2)).join(' > '))
 }
 
+
+// ================================================================ personagem
+console.log('\n== um booster por personagem ==')
+{
+  const ds = await defs()
+  const chars = await tudo(`select slug, name from characters order by display_order, id`)
+  for (const c of chars) {
+    const d = ds.find((x) => x.slug === `booster-${c.slug}`)
+    checar(`booster-${c.slug}: existe e esta na loja`, !!d && d.elegivel_loja)
+    if (!d) continue
+    const filtros = d.slots.map((s) => JSON.stringify(s.filtro?.characters ?? []))
+    checar(`booster-${c.slug}: TODO slot filtra o personagem`,
+      filtros.every((f) => f === JSON.stringify([c.slug])), filtros.join(' '))
+  }
+
+  // as odds tem que ser as mesmas do Comum: o booster de personagem restringe
+  // QUEM sai, nao a raridade
+  const comum = ds.find((x) => x.slug === 'comum')
+  const ped = ds.find((x) => x.slug === 'booster-pedrao')
+  const chave = (d) => d.slots.map((s) => s.odds
+    .map((o) => `${o.tier}:${o.weight}`).sort().join(',')).join(' | ')
+  checar('booster de personagem tem as odds do Comum', chave(comum) === chave(ped))
+
+  // e na pratica so vem aquele personagem
+  const id = ped.id
+  await como(A, `select public.admin_entregar_pacote($1::int, 'ana', 15, false)`, [id])
+  const fora = []
+  for (let i = 0; i < 15; i++) {
+    const r = (await como(A, `select public.open_pack($1::int) as r`, [id])).r
+    for (const x of r.cartas) if (x.character_slug !== 'pedrao') fora.push(x.character_slug)
+  }
+  checar('15 aberturas do Booster Pedrao e so vem Pedrao', fora.length === 0,
+    fora.join(',') || 'so pedrao')
+}
+
+// o quarto Belesma chega e o booster dele nasce junto
+{
+  await db.exec(`insert into characters (slug, name, display_order,
+                                        palette_primary, palette_accent)
+                 values ('invasor', 'Belesma Invasor', 99, '#000', '#fff')
+                 on conflict do nothing;`)
+  const criados = (await como(A, `select public.admin_criar_booster_faltando() as r`)).r
+  checar('personagem novo ganha booster sozinho',
+    criados.some((c) => /Invasor/.test(c.personagem)), JSON.stringify(criados))
+  checar('e rodar de novo nao duplica',
+    (await como(A, `select public.admin_criar_booster_faltando() as r`)).r.length === 0)
+  await db.exec(`delete from pack_definitions where slug = 'booster-invasor';
+                 delete from characters where slug = 'invasor';`)
+}
+
+// pack_config nao engana mais
+await deveFalhar('editar pack_config e recusado com explicacao', A,
+  `select public.admin_set_pack_config('[]'::jsonb)`)
+
 // ================================================================ filtro
 console.log('\n== o filtro restringe o pool de verdade ==')
 {

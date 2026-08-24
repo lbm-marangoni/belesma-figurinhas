@@ -11,7 +11,11 @@ import AdminPacotes from './AdminPacotes'
  * nada: toda chamada abaixo volta "nao autorizado" para quem não é is_admin.
  */
 
-const ABAS = ['Saúde', 'Jogadores', 'Pacotes', 'Odds', 'Estoque', 'Sorteio',
+// A aba "Odds" saiu. Ela editava pack_config, e desde que o sorteio passou a
+// ler pack_slot_odds (por definicao de pacote) aquilo nao alimentava mais
+// nada: dizia "salvo" e o jogo continuava igual. Um botao que mente e pior
+// que um botao que nao existe. As odds vivem em Pacotes.
+const ABAS = ['Saúde', 'Jogadores', 'Pacotes', 'Estoque', 'Sorteio',
               'Conteúdo', 'Zona de perigo', 'Log'] as const
 type Aba = (typeof ABAS)[number]
 
@@ -49,7 +53,6 @@ export default function Admin() {
       {aba === 'Jogadores' && <Jogadores />}
       {aba === 'Pacotes' && <AdminPacotes />}
       {aba === 'Sorteio' && <Sorteio />}
-      {aba === 'Odds' && <Odds />}
       {aba === 'Estoque' && <Estoque />}
       {aba === 'Conteúdo' && <Conteudo />}
       {aba === 'Zona de perigo' && <Perigo />}
@@ -366,72 +369,7 @@ function Jogadores() {
   )
 }
 
-// ================================================================ Odds
-function Odds() {
-  const [linhas, setLinhas] = useState<any[]>([])
-  const { rodar, Aviso } = useAviso()
 
-  const carregar = async () => {
-    const { data } = await supabase.from('pack_config').select('*')
-      .order('pack_type').order('slot').order('tier')
-    setLinhas(data ?? [])
-  }
-  useEffect(() => { carregar() }, [])
-
-  const somas = new Map<string, number>()
-  for (const l of linhas) {
-    const k = `${l.pack_type}/${l.slot}`
-    somas.set(k, (somas.get(k) ?? 0) + Number(l.weight))
-  }
-  const tudoCem = [...somas.values()].every((v) => Math.abs(v - 100) < 1e-9)
-
-  return (
-    <div>
-      <Aviso />
-      <p className="mb-3 text-sm text-neutral-500">
-        Cada tipo de pacote precisa somar 100%. O banco recusa se não fechar — o botão
-        só evita a viagem.
-      </p>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {[...somas.keys()].map((grupo) => {
-          const [pt, slot] = grupo.split('/')
-          const soma = somas.get(grupo)!
-          return (
-            <div key={grupo} className="rounded border border-neutral-800 p-3">
-              <div className="mb-2 flex justify-between text-sm">
-                <span className="font-medium">{pt} · {slot}</span>
-                <span className={Math.abs(soma - 100) < 1e-9 ? 'text-neutral-500' : 'text-red-400'}>
-                  {soma}%{Math.abs(soma - 100) < 1e-9 ? '' : ` (falta ${(100 - soma).toFixed(2)})`}
-                </span>
-              </div>
-              {linhas.filter((l) => l.pack_type === pt && l.slot === slot).map((l) => (
-                <label key={l.tier} className="flex items-center justify-between gap-2 py-0.5 text-sm">
-                  <span className="text-neutral-400">{l.tier}</span>
-                  <input type="number" step="0.01" value={l.weight}
-                    onChange={(e) => setLinhas(linhas.map((x) =>
-                      x === l ? { ...x, weight: e.target.value } : x))}
-                    className={`${campo} w-24 text-right`} />
-                </label>
-              ))}
-            </div>
-          )
-        })}
-      </div>
-      <div className="mt-4 flex gap-2">
-        <button className={botao} disabled={!tudoCem} onClick={async () => {
-          if (await rodar(() => supabase.rpc('admin_set_pack_config', {
-            p_rows: linhas.map((l) => ({
-              pack_type: l.pack_type, slot: l.slot, tier: l.tier, weight: Number(l.weight),
-            })),
-          }), (n) => `${n} linha(s) salvas e registradas no log`)) carregar()
-        }}>salvar</button>
-        <button className="text-sm text-neutral-500 underline" onClick={carregar}>descartar</button>
-      </div>
-    </div>
-  )
-}
-
-// ================================================================ Estoque
 function Estoque() {
   const [r, setR] = useState<any>(null)
   const { rodar, Aviso } = useAviso()

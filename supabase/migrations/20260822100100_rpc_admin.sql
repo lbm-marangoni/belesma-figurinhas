@@ -102,6 +102,10 @@ end;
 $$;
 
 -- ================================================================ odds e precos
+-- Uma migracao posterior troca o retorno para void (a funcao passou a so
+-- recusar: pack_config nao alimenta mais o sorteio). Sem o drop, reaplicar a
+-- cadeia inteira estoura com "cannot change return type".
+drop function if exists public.admin_set_pack_config(jsonb);
 create or replace function public.admin_set_pack_config(p_rows jsonb)
 returns int
 language plpgsql volatile security definer

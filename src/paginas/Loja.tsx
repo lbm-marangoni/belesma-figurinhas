@@ -9,8 +9,10 @@ import type { DefinicaoPacote } from '../lib/tipos'
  * O teto de 3 pacotes por dia é contado NO SERVIDOR, pela janela de 24h do
  * extrato. Aqui só mostramos o contador — a regra não é do cliente.
  *
- * O pacote dirigido sorteia só de um personagem e custa o dobro: serve para
- * fechar página do álbum.
+ * O pacote de personagem é uma DEFINIÇÃO como qualquer outra — Booster
+ * Pedrão, Booster Santão, Booster Dinho — e não um modificador escondido no
+ * preço. Chegou a ser um `select` que mandava p_character_id e dobrava o
+ * valor; ninguém via um produto, via um multiplicador.
  */
 
 type Preco = { chave: string; valor: number }
@@ -21,8 +23,6 @@ export default function Loja() {
   const [precos, setPrecos] = useState<Map<string, number>>(new Map())
   /** O que esta a venda vem do catalogo, nao de uma lista aqui dentro. */
   const [aVenda, setAVenda] = useState<DefinicaoPacote[]>([])
-  const [personagens, setPersonagens] = useState<{ id: number; slug: string; name: string }[]>([])
-  const [dirigidoA, setDirigidoA] = useState<string>('')
   const [extrato, setExtrato] = useState<Lancamento[]>([])
   const [compradosHoje, setComprados] = useState(0)
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
@@ -30,9 +30,8 @@ export default function Loja() {
 
   const carregar = async () => {
     if (!jogador) return
-    const [ec, ch, bl, pd] = await Promise.all([
+    const [ec, bl, pd] = await Promise.all([
       supabase.from('economy_config').select('chave, valor'),
-      supabase.from('characters').select('id, slug, name').order('display_order'),
       supabase.from('baba_log').select('*').order('id', { ascending: false }).limit(60),
       supabase.from('pack_definitions')
         .select('id, slug, name, descricao, art_path, tamanho, distribuicao, elegivel_loja, '
@@ -41,7 +40,6 @@ export default function Loja() {
     ])
     setPrecos(new Map(((ec.data ?? []) as Preco[]).map((p) => [p.chave, Number(p.valor)])))
     setAVenda((pd.data ?? []) as unknown as DefinicaoPacote[])
-    setPersonagens(ch.data ?? [])
     const lanc = (bl.data ?? []) as Lancamento[]
     setExtrato(lanc)
     const limite = Date.now() - 24 * 3600 * 1000
@@ -52,13 +50,11 @@ export default function Loja() {
   if (!jogador) return null
 
   const teto = precos.get('teto_compra_dia') ?? 3
-  const mult = precos.get('dirigido_mult') ?? 2
 
   async function comprar(def: DefinicaoPacote) {
     setOcupado(true); setMsg(null)
     const { data, error } = await supabase.rpc('comprar_pacote', {
       p_pack_type: def.slug,
-      p_character_id: dirigidoA ? Number(dirigidoA) : null,
     })
     setOcupado(false)
     if (error) return setMsg({ tipo: 'erro', texto: error.message })
@@ -98,25 +94,12 @@ export default function Loja() {
         </p>
       )}
 
-      <label className="mb-4 flex flex-wrap items-center gap-2 text-sm text-neutral-400">
-        Pacote dirigido
-        <select value={dirigidoA} onChange={(e) => setDirigidoA(e.target.value)} className="campo">
-          <option value="">qualquer Belesma (preço normal)</option>
-          {personagens.map((p) => (
-            <option key={p.id} value={p.id}>só {p.name} — custa {mult}×</option>
-          ))}
-        </select>
-        <span className="text-xs text-neutral-600">
-          mesmo conteúdo e mesmas odds, só de um personagem. Serve para fechar página do álbum.
-        </span>
-      </label>
-
       {/* A vitrine e o catalogo: qualquer definicao marcada como elegivel para
           loja aparece aqui sozinha, com preco, tamanho e o que resta da
           edicao se ela for limitada. */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {aVenda.map((d) => {
-          const preco = (d.preco_baba ?? 0) * (dirigidoA ? mult : 1)
+          const preco = d.preco_baba ?? 0
           const restam = d.limite_global == null
             ? null : d.limite_global - d.aberturas_realizadas
           const esgotou = restam != null && restam <= 0
@@ -137,7 +120,6 @@ export default function Loja() {
               )}
               <p className="text-sm text-neutral-400">
                 <strong className="text-[var(--acento)]">{preco}</strong> baba
-                {dirigidoA && <span className="text-neutral-600"> (dirigido)</span>}
               </p>
               <button onClick={() => comprar(d)} disabled={ocupado || !podeComprar}
                 className="btn btn-forte w-full">

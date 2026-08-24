@@ -190,8 +190,15 @@ checar('compra credita o pacote',
     === Number(antesPac.packs_common) + 1)
 checar('o saldo caiu certinho', compra.saldo === antesPac.baba - 120, `${compra.saldo}`)
 
-const dirigido = (await como(A, `select public.comprar_pacote('comum', 1) as r`)).r
-checar('pacote dirigido custa o dobro', Number(dirigido.preco) === 240, `${dirigido.preco}`)
+// O "pacote dirigido" era um parametro escondido que dobrava o preco. Virou
+// produto: existe um Booster por personagem no catalogo, com filtro no slot.
+await deveFalhar('o parametro dirigido nao e mais aceito', A,
+  `select public.comprar_pacote('comum', 1)`)
+const dirigido = (await como(A, `select public.comprar_pacote('booster-pedrao') as r`)).r
+checar('Booster de personagem custa o dobro do Comum',
+  Number(dirigido.preco) === 240, `${dirigido.preco}`)
+checar('e o pacote comprado e o do personagem',
+  /Pedr/.test(String(dirigido.nome)), String(dirigido.nome))
 
 await como(A, `select public.comprar_pacote('comum', null)`)
 await deveFalhar('teto de 3 compras por dia', A, `select public.comprar_pacote('comum', null)`)
